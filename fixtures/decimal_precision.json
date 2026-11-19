@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "corrections": [
+    {
+      "name": "decimal",
+      "version": 1,
+      "inputs": [],
+      "output": {
+        "name": "value",
+        "type": "real"
+      },
+      "data": 1755.5355805337563
+    }
+  ]
+}

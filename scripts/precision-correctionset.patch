@@ -1,0 +1,17 @@
+--- a/src/correction.cc
++++ b/src/correction.cc
+@@ -887,3 +887,3 @@
+     rapidjson::GzFileReadStream is(fpz, readBuffer, sizeof(readBuffer));
+-    ok = json.ParseStream<rapidjson::kParseNanAndInfFlag>(is);
++    ok = json.ParseStream<rapidjson::kParseNanAndInfFlag | rapidjson::kParseFullPrecisionFlag>(is);
+     gzclose(fpz);
+@@ -894,3 +894,3 @@
+     rapidjson::FileReadStream is(fp, readBuffer, sizeof(readBuffer));
+-    ok = json.ParseStream<rapidjson::kParseNanAndInfFlag>(is);
++    ok = json.ParseStream<rapidjson::kParseNanAndInfFlag | rapidjson::kParseFullPrecisionFlag>(is);
+     fclose(fp);
+@@ -909,3 +909,3 @@
+   rapidjson::Document json;
+-  rapidjson::ParseResult ok = json.Parse<rapidjson::kParseNanAndInfFlag>(data);
++  rapidjson::ParseResult ok = json.Parse<rapidjson::kParseNanAndInfFlag | rapidjson::kParseFullPrecisionFlag>(data);
+   if (!ok) {

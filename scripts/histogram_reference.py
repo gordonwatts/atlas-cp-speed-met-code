@@ -36,6 +36,19 @@ def fill(histogram: hist.Hist, state: str, gev: np.ndarray) -> None:
     histogram.fill(state, gev, threads=1)
 
 
+def save(histogram: hist.Hist, labels: list[str], entries: int, output_file: Path) -> None:
+    sumw = histogram.values(flow=True)
+    sumw2 = histogram.variances(flow=True)
+    counts = sumw.astype(np.int64)
+    np.testing.assert_array_equal(counts, sumw)
+    np.testing.assert_array_equal(counts, sumw2)
+    np.testing.assert_array_equal(counts.sum(axis=1), np.full(len(labels), entries))
+    with output_file.open("xb") as output:
+        np.savez(
+            output, state_labels=np.array(labels), bin_edges_gev=histogram.axes[1].edges,
+            counts=counts, sumw=sumw, sumw2=sumw2,
+        )
+
 @app.command()
 def write(analysis_file: Path, metadata_file: Path, output_file: Path, stored: bool = False) -> None:
     with root_file(metadata_file) as meta:
@@ -56,17 +69,7 @@ def write(analysis_file: Path, metadata_file: Path, output_file: Path, stored: b
                 for label, field in zip(labels, fields, strict=True):
                     fill(histogram, label, met_gev(chunk[field]))
         entries = original["analysis"].num_entries
-    sumw = histogram.values(flow=True)
-    sumw2 = histogram.variances(flow=True)
-    counts = sumw.astype(np.int64)
-    np.testing.assert_array_equal(counts, sumw)
-    np.testing.assert_array_equal(counts, sumw2)
-    np.testing.assert_array_equal(counts.sum(axis=1), np.full(len(labels), entries))
-    with output_file.open("xb") as output:
-        np.savez(
-            output, state_labels=np.array(labels), bin_edges_gev=histogram.axes[1].edges,
-            counts=counts, sumw=sumw, sumw2=sumw2,
-        )
+    save(histogram, labels, entries, output_file)
 
 
 if __name__ == "__main__":
