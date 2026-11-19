@@ -1,0 +1,30 @@
+{
+  "seq1_MetMakerAlg_AnaMET": {
+    "Type": "CP::MetMakerAlg",
+    "Properties": {
+      "softTermKey": "PVSoftTrk",
+      "Tools": {
+        "systematicsTool": {
+          "Type": "met::METSystematicsTool",
+          "Properties": {
+            "ConfigPrefix": "'METUtilities/R22_PreRecs/'",
+            "ConfigSoftTrkFile": "'TrackSoftTerms-pflow_Dec24.config'",
+            "ConfigSoftCaloFile": "''",
+            "ConfigJetTrkFile": "''",
+            "EventInfo": "'EventInfo'",
+            "TruthContainer": "'MET_Truth'",
+            "UseDevArea": "0",
+            "VertexContainer": "'PrimaryVertices'"
+          }
+        }
+      }
+    }
+  },
+  "seq1_MetBuilderAlg_AnaMET": {
+    "Type": "CP::MetBuilderAlg",
+    "Properties": {
+      "softTerm": "PVSoftTrk",
+      "finalKey": "Final"
+    }
+  }
+}
