@@ -108,6 +108,8 @@ Remove diagnostics from timed commands. For the nominal-only path use the indepe
 
 ### M02 maker-reuse trial
 
+This archived experiment is available from commit `75bf30d`. The retained pipeline uses the faithful maker path.
+
 M02 has the same standalone command and payloads as the faithful checkpoint
 `6b19c477e8d5578bb2c8c3a5e0eccc11e3437759`. Archive the trial commit into
 a fresh source/build/runtime directory with `scripts/build_columnar_full.sh`.

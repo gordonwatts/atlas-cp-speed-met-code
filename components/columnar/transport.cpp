@@ -679,25 +679,20 @@ void trace_maker_rows(std::ostream& output,std::uint64_t entry,std::size_t state
     const auto prefix=[&](std::string_view action) -> std::ostream& {
         return output << entry << '\t' << state << '\t' << action << '\t';
     };
-    if (state==0) {
-        for (const auto& flag:result.flag_writes) {
-            prefix("associationFlag") << flag.association << '\t' << flag.slot << '\t' << flag.selected << '\n';
-            prefix("associationActor") << flag.association << '\t' << flag.slot << '\t'
-                << static_cast<int>(flag.term) << '\t' << flag.original.owner.value << '\t'
-                << flag.original.index << '\n';
-        }
-        for (const auto& row:result.jet_decisions) {
-            if (row.jvt_pass) prefix("jetJvt") << row.current.index << '\t' << *row.jvt_pass << '\n';
-        }
-        prefix("rebuildMET") << "RefEle\t" << input.electrons.selected.size() << "\t1\n";
-        prefix("rebuildMET") << "RefGamma\t" << input.photons.selected.size() << "\t1\n";
-        prefix("rebuildMET") << "RefTau\t" << input.taus.selected.size() << "\t1\n";
-        prefix("rebuildMET") << "Muons\t" << input.muons.selected.size() << "\t1\n";
-        prefix("rebuildJetMET") << "RefJet\tPVSoftTrk\t" << input.jets.size() << "\t1\t1\n";
-    } else {
-        // Only provenance is written. No flag setters or JVT decisions ran in this state.
-        prefix("makerReuse") << "0\t1\n";
+    for (const auto& flag:result.flag_writes) {
+        prefix("associationFlag") << flag.association << '\t' << flag.slot << '\t' << flag.selected << '\n';
+        prefix("associationActor") << flag.association << '\t' << flag.slot << '\t'
+            << static_cast<int>(flag.term) << '\t' << flag.original.owner.value << '\t'
+            << flag.original.index << '\n';
     }
+    for (const auto& row:result.jet_decisions) {
+        if (row.jvt_pass) prefix("jetJvt") << row.current.index << '\t' << *row.jvt_pass << '\n';
+    }
+    prefix("rebuildMET") << "RefEle\t" << input.electrons.selected.size() << "\t1\n";
+    prefix("rebuildMET") << "RefGamma\t" << input.photons.selected.size() << "\t1\n";
+    prefix("rebuildMET") << "RefTau\t" << input.taus.selected.size() << "\t1\n";
+    prefix("rebuildMET") << "Muons\t" << input.muons.selected.size() << "\t1\n";
+    prefix("rebuildJetMET") << "RefJet\tPVSoftTrk\t" << input.jets.size() << "\t1\t1\n";
     for (const auto& term:result.terms) {
         for (const auto& c:term.contributors) {
             prefix("contributor") << term.name << '\t' << c.current.owner.value << '\t'
@@ -807,20 +802,13 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
             input.vertex_types=jet_input.vertex_events.row(jet_input.vertex_types,event);
             input.capture_flag_writes=trace_path!=nullptr;
 
-            // The bound maker has no systematic argument. These raw spans and selected
-            // current objects stay fixed while each state's downstream operations run.
-            const auto maker=a::invoke_maker(*bundle->rebuild,input);
-            const bool maker_ok=maker.status==m::Status::success && maker.terms.size()==7;
-            if (trace_path) {
-                trace << first_entry+event << "\t0\tmakerInvocation\t" << maker_ok << '\n';
-            }
-            if (!maker_ok) {
-                const auto issue=maker.diagnostics.empty() ? -1:static_cast<int>(maker.diagnostics.back().issue);
-                throw std::runtime_error("C maker issue "+std::to_string(issue)+" entry "+
-                                         std::to_string(first_entry+event)+" state "+states[0]);
-            }
             for (std::size_t state=0; state<state_count; ++state) {
                 const std::string stamp="entry "+std::to_string(first_entry+event)+" state "+states[state];
+                const auto maker=a::invoke_maker(*bundle->rebuild,input);
+                if (maker.status!=m::Status::success || maker.terms.size()!=7) {
+                    const auto issue=maker.diagnostics.empty() ? -1:static_cast<int>(maker.diagnostics.back().issue);
+                    throw std::runtime_error("C maker issue "+std::to_string(issue)+" "+stamp);
+                }
                 if (trace_path) trace_maker_rows(trace,first_entry+event,state,input,maker);
                 auto rebuilt=soft_terms(maker.terms);
                 if (!maker.constituent_links_available) {
