@@ -134,6 +134,11 @@ class Resolved:
             name = target+"AuxDyn."+field
             if name not in self.data.raw:
                 continue
+            # A later resolution can ask for the same unreachable branch. Check
+            # its exact empty gather and scatter once per chunk and projection.
+            empty_projection = (name,dtype,type(default),default,slot,lengths) if not rows.size else None
+            if empty_projection is not None and empty_projection in self.data.validated_empty_columns:
+                continue
             source = ak.flatten(self.data.raw[name], axis=1)[rows]
             if lengths:
                 source = ak.num(source, axis=1)
@@ -142,6 +147,8 @@ class Resolved:
             missing = np.asarray(ak.is_none(source, axis=0))
             output[local] = dense(source, dtype, default)
             present[local] = ~missing
+            if empty_projection is not None:
+                self.data.validated_empty_columns.add(empty_projection)
         return output, present
 
     def nested_link(self, field, slot):
@@ -199,6 +206,7 @@ class Data:
         self.output, self.keys, self.evaluate = output, keys, evaluate
         self.capture_preparation = capture_preparation
         self.counts = {}
+        self.validated_empty_columns = set()
         self.events = {owner: roles_for_events(output[short+".o"]) for short,owner in OWNERS.items()}
 
     def offset(self, anchor):
