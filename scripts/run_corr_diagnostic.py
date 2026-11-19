@@ -10,7 +10,10 @@ app = typer.Typer(add_completion=False)
 
 
 @app.command()
-def run(input_file: Path, configuration: Path, events: int = typer.Option(16, min=1, max=20000)) -> None:
+def run(
+    input_file: Path, configuration: Path, events: int = typer.Option(16, min=1, max=20000),
+    output_name: str = "reference",
+) -> None:
     from AnalysisAlgorithmsConfig.EventLoopCPRunScript import EventLoopCPRunScript
 
     class CorrelatedMETDiagnostic(EventLoopCPRunScript):
@@ -21,7 +24,7 @@ def run(input_file: Path, configuration: Path, events: int = typer.Option(16, mi
 
     sys.argv = [
         sys.argv[0], "--direct-driver", "--dump-full-config", "-i", str(input_file),
-        "-t", str(configuration), "-o", "reference", "-e", str(events),
+        "-t", str(configuration), "-o", output_name, "-e", str(events),
     ]
     CorrelatedMETDiagnostic().run()
 
