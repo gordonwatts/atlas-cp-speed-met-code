@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace m = atlas::met::maker;
 namespace a = atlas::met::adapter;
@@ -101,6 +102,32 @@ public:
     }
 private:
     std::span<const std::int64_t> values_;
+};
+
+class ChunkJetTrackCounts {
+public:
+    std::pair<std::span<const std::int32_t>, const Offset&> bind(const Columns& cols)
+    {
+        // Keep the flat-field error ahead of first offset validation, as before.
+        const auto values = cols.get<std::int32_t>("jet.ntrk");
+        if (!offsets_) {
+#ifdef ATLAS_MET_M27_DIAGNOSTICS
+            ++constructor_calls_;
+#endif
+            offsets_.emplace(cols,"jet.ntrk.o");
+        }
+        return {values,*offsets_};
+    }
+
+#ifdef ATLAS_MET_M27_DIAGNOSTICS
+    std::size_t constructor_calls() const { return constructor_calls_; }
+#endif
+
+private:
+    std::optional<Offset> offsets_;
+#ifdef ATLAS_MET_M27_DIAGNOSTICS
+    std::size_t constructor_calls_{};
+#endif
 };
 
 template<class T>
@@ -603,11 +630,11 @@ struct EventObjects {
 };
 
 EventObjects prepare_views(const Columns& cols, std::span<const ObjectRows> owners, std::size_t event,
-                           const Jets& jet_input, const MetColumnar& bundle, std::span<float> scores)
+                           const Jets& jet_input, const MetColumnar& bundle, std::span<float> scores,
+                           ChunkJetTrackCounts& track_counts)
 {
     EventObjects packed;
-    const auto ntrk=cols.get<std::int32_t>("jet.ntrk");
-    const Offset ntrk_offsets(cols,"jet.ntrk.o");
+    const auto [ntrk,ntrk_offsets]=track_counts.bind(cols);
     for (std::size_t i=0; i<owners.size(); ++i) {
         const auto& owner=owners[i];
         const auto start=owner.events.start(event);
@@ -741,6 +768,10 @@ a::SignificanceResult calculate_significance(const Columns& cols,std::span<const
 }
 } // namespace
 
+#ifdef ATLAS_MET_M27_DIAGNOSTICS
+#include "m27_offsets_check.inc"
+#endif
+
 extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::uint64_t first_entry,
     const char* const* states, std::size_t state_count, const MetColumn* columns,std::size_t column_count,
     float* terms_out,std::uint64_t* sources_out,float* significance_out,const char* trace_path)
@@ -778,8 +809,9 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
             trace.precision(std::numeric_limits<double>::max_digits10);
         }
         std::vector<float> scores(objects.front().events.length());
+        ChunkJetTrackCounts track_counts;
         for (std::size_t event=0; event<events; ++event) {
-            const auto view=prepare_views(cols,objects,event,jet_input,*bundle,scores);
+            const auto view=prepare_views(cols,objects,event,jet_input,*bundle,scores,track_counts);
             if (trace_path) trace_prepared_rows(trace,cols,objects,*bundle,first_entry+event,event);
             const auto core_rows=core.event(event);
             const auto truth_rows=truth.event(event);
@@ -878,6 +910,12 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
                 }
             }
         }
+#ifdef ATLAS_MET_M27_DIAGNOSTICS
+        if (trace_path) {
+            trace << (events ? first_entry+events-1 : first_entry) << "\t0\tntrkOffsetConstructorCalls\t"
+                  << first_entry << '\t' << events << '\t' << track_counts.constructor_calls() << '\n';
+        }
+#endif
         if (trace_path && !trace) throw std::runtime_error("C trace write failed");
         return 0;
     } catch (const std::exception& error) { error_message=error.what(); return 1; }
