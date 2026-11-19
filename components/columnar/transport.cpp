@@ -633,6 +633,21 @@ EventObjects prepare_views(const Columns& cols, std::span<const ObjectRows> owne
     return packed;
 }
 
+// AnalysisBase 25.2.117 IParticle energy getters: Jet_v1.cxx:63,
+// Egamma_v1.cxx:86, Muon_v1.cxx:62, TauJet_v3.cxx:87 and Photon_v1.cxx:46.
+// ROOT 6.40.02 PtEtaPhiM4D.h:150-189 and etaMax.h define double E.
+double prepared_getter_energy(const m::PtEtaPhiM& q, m::ParticleKind kind)
+{
+    if (kind==m::ParticleKind::photon) return q.pt*std::cosh(q.eta);
+    constexpr double eta_max=22756.;
+    const double p=q.pt>0 ? q.pt*std::cosh(q.eta)
+        : std::max(std::abs(q.eta)-eta_max,0.);
+    const double p2=p*p;
+    const double mass2=q.mass*q.mass;
+    const double energy2=p2+(q.mass<0 ? -mass2 : mass2);
+    return std::sqrt(energy2>0 ? energy2 : 0.);
+}
+
 void trace_prepared_rows(std::ostream& output,const Columns& cols,
     std::span<const ObjectRows> owners,std::uint64_t entry,std::size_t event)
 {
@@ -646,6 +661,15 @@ void trace_prepared_rows(std::ostream& output,const Columns& cols,
         const auto gates=i ? cols.get<std::uint32_t>(stem+".gate") : std::span<const std::uint32_t>{};
         for (auto row=start; row<owner.events.end(event); ++row) {
             const auto q=p4.row(row);
+            const auto local=row-start;
+            auto physical=q;
+            if (const auto fixed=xAOD_fixed_mass(owner.kind)) physical.mass=*fixed;
+            const int pass=i ? (at(selected,row)!=0) : -1;
+            output << entry << "\t0\tpreparedGetter\t" << stem << '\t' << local
+                << '\t' << owner.key << '\t' << local << '\t' << pass
+                << '\t' << std::hexfloat << physical.pt << '\t' << physical.eta << '\t'
+                << physical.phi << '\t' << physical.mass << '\t'
+                << prepared_getter_energy(physical,owner.kind) << std::defaultfloat << '\n';
             output << entry << "\t0\tprepared\t" << stem << '\t' << owner.key << '\t'
                 << row-start << '\t' << (i ? at(selected,row)!=0 : true) << '\t'
                 << q.pt << '\t' << q.eta << '\t' << q.phi << '\t' << q.mass;

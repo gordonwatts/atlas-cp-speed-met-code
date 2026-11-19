@@ -6,6 +6,7 @@ from collections import Counter
 from itertools import groupby, zip_longest
 import json
 from pathlib import Path
+import struct
 import sys
 
 import awkward as ak
@@ -72,7 +73,17 @@ def numeric_match(a, b, quantity):
     return compare_numeric(reference,given,quantity)["total_failures"] == 0
 
 
-def trace_match(stock, config, entries, states, stock_file, given_file):
+def getter_rows(path, entries):
+    reverse_roles = {prefix: role for prefix,role in ROLES.items()}
+    with path.open() as file:
+        rows = (line.rstrip("\n").split("\t") for line in file)
+        for entry, group in groupby(rows,key=lambda row: int(row[0])):
+            if entry >= entries:
+                break
+            yield entry, [[reverse_roles[role],*fields] for _,role,*fields in group]
+
+
+def trace_match(stock, config, entries, states, stock_file, given_file, stock_getters):
     prepared, raw_key = prepared_fields(stock,config,entries)
     # Stock's key is its shallow-container hash. C's current object key is the
     # original owner with bit 31 set. The event-local index and original owner
@@ -89,6 +100,7 @@ def trace_match(stock, config, entries, states, stock_file, given_file):
     examples = {}
     worst_p4_delta = {}
     accessor_mass = {"electron":0.510998910,"muon":105.658367}
+    getter_stream = getter_rows(stock_getters,entries) if stock_getters is not None else None
 
     def check(kind, entry, equal, reference=None, actual=None):
         compared[kind] += 1
@@ -137,6 +149,27 @@ def trace_match(stock, config, entries, states, stock_file, given_file):
                             "called" if state in dict(a.get("gaussian",[])) else "skipped"]
                 check("seed",entry,seed == expected,expected,seed)
             check("seed_length",entry,len(observed_seeds) == len(states),len(states),len(observed_seeds))
+
+            if getter_stream is not None:
+                stock_entry, getter_expected = next(getter_stream, (None, []))
+                check("getter_entry",entry,stock_entry==entry,entry,stock_entry)
+                getter_actual = [values for _,action,values in observed[1] if action=="preparedGetter"]
+                sort_key = lambda row: (row[0],int(row[1]))
+                getter_expected.sort(key=sort_key)
+                getter_actual.sort(key=sort_key)
+                check("getter_count",entry,len(getter_expected)==len(getter_actual),
+                      len(getter_expected),len(getter_actual))
+                for left,right in zip_longest(getter_expected,getter_actual):
+                    if left is None or right is None:
+                        check("getter_identity",entry,False,left,right)
+                        continue
+                    check("getter_identity",entry,left[:5]==right[:5],left[:5],right[:5])
+                    for field,want,have in zip(("pt","eta","phi","m","e"),left[5:],right[5:],strict=True):
+                        exact = struct.pack("=d",float.fromhex(want)) == struct.pack("=d",float.fromhex(have))
+                        label = f"getter_{left[0]}_{field}"
+                        check(label,entry,exact,want,have)
+                        if left[4] == "1":
+                            check(label+"_selected",entry,exact,want,have)
 
             objects = []
             for role, rows in prepared.items():
@@ -196,6 +229,7 @@ def trace_match(stock, config, entries, states, stock_file, given_file):
                 for left,right in zip_longest(want,have):
                     check("ordered_constituent_link_weight",entry,left == right,left,right)
     return {"compared":compared,"failures":failures,"first_failures":examples,
+            "stock_getters":str(stock_getters) if stock_getters is not None else None,
             "worst_p4_delta":worst_p4_delta,
             "owner_map":{role: {"original":key,"stock_shallow":stock_key.get(role),"columnar_current":key | 2**31}
                          for role,key in raw_key.items()}}
@@ -203,6 +237,7 @@ def trace_match(stock, config, entries, states, stock_file, given_file):
 
 def main(stock_dir: Path, stock_histogram: Path, candidate_observables: Path, candidate_histogram: Path,
          output: Path, stock_trace: Path | None = None, candidate_trace: Path | None = None,
+         stock_getters: Path | None = None,
          expected_events: int | None = typer.Option(None,min=1)):
     with root_file(stock_dir/"hist-reference.root") as file:
         states = file["systematicsList"].axis().labels()
@@ -240,11 +275,11 @@ def main(stock_dir: Path, stock_histogram: Path, candidate_observables: Path, ca
         report["histogram"] = {key: np.array_equal(stock_hist[key],candidate_hist[key]) for key in stock_hist.files}
         if set(stock_hist.files) != set(candidate_hist.files):
             raise ValueError("Unexpected histogram fields")
-        if bool(stock_trace) != bool(candidate_trace):
-            raise ValueError("Provide both independent stock and candidate traces")
+        if bool(stock_trace) != bool(candidate_trace) or (stock_getters is not None and stock_trace is None):
+            raise ValueError("Provide independent stock and candidate status traces, optionally with the stock getter trace")
         if stock_trace is not None:
             config = json.loads((stock_dir/"full_config.json").read_text())
-            report["trace"] = trace_match(stock,config,entries,states,stock_trace,candidate_trace)
+            report["trace"] = trace_match(stock,config,entries,states,stock_trace,candidate_trace,stock_getters)
     report["passed"] = (not any(row["total_failures"] for row in report["numerical"].values())
                         and not any(row["count"] for row in (*report["exact"].values(),*report["event_bins"].values()))
                         and all(report["histogram"].values())
