@@ -31,9 +31,9 @@ struct Domain {};
 
 struct Invocation {
     const EventView* event = nullptr;
-    SoftResult* corrected = nullptr;
+    std::optional<SoftResult>* corrected = nullptr;
     std::span<const Term> terms;
-    FinalResult* final = nullptr;
+    std::optional<FinalResult>* final = nullptr;
 };
 
 class Binding {
@@ -129,9 +129,10 @@ public:
 
     double evaluate(const Args& args) const override {
         const auto& binding = Binding::find(*domain_, std::get<std::int64_t>(args.at(ticket_)));
-        if (!binding.event || !binding.corrected) throw std::logic_error("Incorrect MET soft bound operation");
-        *binding.corrected = apply(*binding.event, args);
-        return static_cast<double>(binding.corrected->status);
+        if (!binding.event || !binding.corrected || binding.corrected->has_value()) {
+            throw std::logic_error("Wrong or repeated MET soft bound operation");
+        }
+        return static_cast<double>(binding.corrected->emplace(apply(*binding.event, args)).status);
     }
 
 private:
@@ -237,9 +238,10 @@ public:
 
     double evaluate(const Args& args) const override {
         const auto& binding = Binding::find(*domain_, std::get<std::int64_t>(args.at(ticket_)));
-        if (!binding.final) throw std::logic_error("Incorrect MET Final bound operation");
-        *binding.final = ordered_sum(binding.terms);
-        return static_cast<double>(binding.final->status);
+        if (!binding.final || binding.final->has_value()) {
+            throw std::logic_error("Wrong or repeated MET Final bound operation");
+        }
+        return static_cast<double>(binding.final->emplace(ordered_sum(binding.terms)).status);
     }
 
 private:
@@ -298,10 +300,13 @@ std::unique_ptr<correction::CorrectionSet> load(const std::string& path, const s
     return correction::CorrectionSet::from_file(path, registry);
 }
 
-void confirm_status(double evaluated, Status result) {
-    if (evaluated != static_cast<double>(result)) {
-        throw std::logic_error("MET soft node disagrees with its bound status");
+template<class Result>
+Result confirm_result(double evaluated, std::optional<Result> result) {
+    if (!result) throw std::logic_error("MET bound node did not execute");
+    if (evaluated != static_cast<double>(result->status)) {
+        throw std::logic_error("MET bound node disagrees with its written status");
     }
+    return std::move(*result);
 }
 
 } // namespace
@@ -324,20 +329,18 @@ SoftFile& SoftFile::operator=(SoftFile&&) noexcept = default;
 
 SoftResult SoftFile::apply(const EventView& input, std::string_view state) const {
     if (!implementation_) throw std::logic_error("Moved-from MET soft provider");
-    SoftResult result;
+    std::optional<SoftResult> result;
     const Binding binding{*implementation_->domain, {&input, &result, {}, nullptr}};
     const double status = implementation_->correct->evaluate({binding.ticket(), std::string(state), 0., 0., 0.});
-    confirm_status(status, result.status);
-    return result;
+    return confirm_result(status, std::move(result));
 }
 
 FinalResult SoftFile::build_final(std::span<const Term> terms) const {
     if (!implementation_) throw std::logic_error("Moved-from MET soft provider");
-    FinalResult result;
+    std::optional<FinalResult> result;
     const Binding binding{*implementation_->domain, {nullptr, nullptr, terms, &result}};
     const double status = implementation_->final->evaluate({binding.ticket()});
-    confirm_status(status, result.status);
-    return result;
+    return confirm_result(status, std::move(result));
 }
 
 MetPhi SoftFile::decorate(Momentum term) const {

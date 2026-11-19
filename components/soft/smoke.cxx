@@ -58,11 +58,28 @@ void check_tables(const char* payload, const char* probes) {
     std::cout << "stock_table_rows_per_loader=" << count << '\n';
 }
 
+void check_wrong_nodes(const char* fixture) {
+    const s::SoftFile wrong(fixture);
+    const auto rejects_missing_write = [](auto operation) {
+        try {
+            operation();
+        } catch (const std::logic_error& error) {
+            return std::string_view(error.what()) == "MET bound node did not execute";
+        }
+        return false;
+    };
+    require(rejects_missing_write([&] { wrong.apply({}, "NOSYS"); }),
+            "constant-zero soft substitute passed the bound-node guard");
+    require(rejects_missing_write([&] { wrong.build_final({}); }),
+            "constant-zero Final substitute passed the bound-node guard");
+}
+
 int main(int argc, char** argv) try {
-    if (argc != 2 && argc != 4) {
-        throw std::invalid_argument("Usage: met_soft_smoke CORRECTIONS [TABLES TABLE_PROBES_TSV]");
+    if (argc != 2 && argc != 4 && argc != 5) {
+        throw std::invalid_argument("Usage: met_soft_smoke CORRECTIONS [TABLES TABLE_PROBES_TSV [WRONG_NODE]]");
     }
-    if (argc == 4) check_tables(argv[2], argv[3]);
+    if (argc >= 4) check_tables(argv[2], argv[3]);
+    if (argc == 5) check_wrong_nodes(argv[4]);
     const s::SoftFile provider(argv[1]);
     const s::SoftFile second(argv[1]);
     constexpr std::array truth{s::Term{"NonInt", 0x21000, {-12000.f, 30000.f, 50000.f}, {}}};
@@ -102,7 +119,12 @@ int main(int argc, char** argv) try {
     require(total.status == s::Status::success && total.momentum.mpx == 2410.f
             && total.momentum.mpy == -1030.f && total.momentum.sumet == 40000.f, "ordered Final sum");
     require(total.decorations.phi == provider.decorate(total.momentum).phi, "Final decoration");
-    require(s::seed_for({})->effective == 1, "zero seed must map to one");
+    const auto zero = s::seed_for({});
+    require(zero && zero->truncated == 0 && zero->setter_argument == 0 && zero->effective == 1,
+            "zero seed must map to one");
+    require(nominal.seed.setter_argument == static_cast<std::uint64_t>(nominal.seed.truncated) &&
+            nominal.seed.effective == static_cast<std::uint32_t>(nominal.seed.setter_argument),
+            "negative seed conversion");
     require(provider.build_final({}).status == s::Status::missing_soft, "missing soft term");
     std::cout << "MET soft provider smoke passed\n";
     return 0;

@@ -64,6 +64,7 @@ struct Recoil {
 
 struct Seed {
     std::int32_t truncated{};
+    std::uint64_t setter_argument{}; // Linux unsigned-long ABI, before zero handling.
     std::uint32_t effective{};
 };
 

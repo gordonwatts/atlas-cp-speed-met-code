@@ -16,6 +16,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -97,6 +98,7 @@ void seed_and_decorations(const s::SoftFile& provider, const xAOD::MissingET& te
     require(matches(decorations.met, term.met()) && matches(decorations.phi, term.phi()), "stock term met/phi");
     const int seed = static_cast<int>(1.e6 * term.phi());
     require(got.seed.truncated == seed, "stock signed seed");
+    require(got.seed.setter_argument == static_cast<unsigned long>(seed), "stock unsigned-long setter argument");
     const auto effective = static_cast<unsigned long>(seed == 0 ? 1 : seed);
     require(got.seed.effective == static_cast<std::uint32_t>(effective), "stock effective seed");
     if (got.drew) {
@@ -213,7 +215,7 @@ struct SeedWitness {
     bool nominal = false;
 };
 
-void compare_release_trace(const char* path) {
+void compare_release_trace(const char* path, std::ostream* witness) {
     std::ifstream source(path);
     require(source.is_open(), "Cannot open stock trace");
     using Key = std::pair<long long, long long>;
@@ -244,12 +246,18 @@ void compare_release_trace(const char* path) {
             const s::Momentum term{static_cast<float>(trace_number(parts[4])),
                 static_cast<float>(trace_number(parts[5])), static_cast<float>(trace_number(parts[6]))};
             const auto seed = s::seed_for(term);
-            require(seed && static_cast<std::uint64_t>(seed->truncated) == *row.seed, "Stock trace seed mismatch");
+            require(seed && seed->setter_argument == *row.seed, "Stock trace seed mismatch");
             require(row.gaussian.has_value() == !row.nominal, "Stock trace unexpected draw reachability");
             ++seed_rows;
             if (row.gaussian) {
                 require(matches(s::root_rng::first_gaussian(seed->effective), *row.gaussian), "Stock trace Gaussian mismatch");
                 ++draw_rows;
+            }
+            if (witness) {
+                *witness << key.first << '\t' << key.second << '\t' << seed->truncated << '\t'
+                         << *row.seed << '\t' << seed->effective << '\t';
+                if (row.gaussian) *witness << std::hexfloat << *row.gaussian << std::defaultfloat;
+                *witness << '\n';
             }
             if (key.first == 1 && row.nominal) {
                 require(seed->truncated == 1158532, "Expected pinned float-phi anchor at entry 1");
@@ -265,12 +273,22 @@ void compare_release_trace(const char* path) {
 } // namespace
 
 int main(int argc, char** argv) try {
-    if (argc != 3) throw std::invalid_argument("Usage: met_soft_stock_compare CORRECTIONS STOCK_STATUS_TSV");
+    if (argc != 3 && argc != 4) {
+        throw std::invalid_argument("Usage: met_soft_stock_compare CORRECTIONS STOCK_STATUS_TSV [SEED_WITNESS_TSV]");
+    }
     require(xAOD::Init("met_soft_stock_compare").isSuccess(), "xAOD initialization");
     const s::SoftFile provider(argv[1]);
     const auto cases = stage_probes(provider);
     std::cout << "stock_stage_cases=" << cases << '\n';
-    compare_release_trace(argv[2]);
+    std::ofstream seeds;
+    if (argc == 4) {
+        require(!std::filesystem::exists(argv[3]), "Choose a fresh seed witness path");
+        seeds.open(argv[3]);
+        require(seeds.is_open(), "Cannot create seed witness");
+        seeds << "entry\tstate_slot\tsigned_int32\tstock_unsigned_long\teffective_uint32\tstock_gaussian\n";
+    }
+    compare_release_trace(argv[2], argc == 4 ? &seeds : nullptr);
+    if (argc == 4) require(seeds.good(), "Seed witness write failed");
     return 0;
 } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

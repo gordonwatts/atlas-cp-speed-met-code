@@ -33,7 +33,8 @@ std::optional<Seed> seed_for(Momentum term) {
     // A finite atan2 output fits int32. The unsigned-long setter receives
     // sign extension followed by modulo conversion; TRandom stores low 32 bits.
     const auto integer = static_cast<std::int32_t>(scaled);
-    return Seed{integer, integer ? static_cast<std::uint32_t>(integer) : 1u};
+    const auto setter_argument = static_cast<std::uint64_t>(integer);
+    return Seed{integer, setter_argument, integer ? static_cast<std::uint32_t>(setter_argument) : 1u};
 }
 
 Recoil calc_recoil(const EventView& event) {

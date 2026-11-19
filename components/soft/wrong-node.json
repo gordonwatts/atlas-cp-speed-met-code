@@ -1,0 +1,79 @@
+{
+  "schema_version": 3,
+  "corrections": [
+    {
+      "name": "correct_pvsofttrk",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "ticket",
+          "type": "int"
+        },
+        {
+          "name": "state",
+          "type": "string"
+        },
+        {
+          "name": "pthard",
+          "type": "real"
+        },
+        {
+          "name": "njet",
+          "type": "real"
+        },
+        {
+          "name": "mu",
+          "type": "real"
+        }
+      ],
+      "output": {
+        "name": "result",
+        "type": "real"
+      },
+      "data": 0
+    },
+    {
+      "name": "build_final",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "ticket",
+          "type": "int"
+        }
+      ],
+      "output": {
+        "name": "result",
+        "type": "real"
+      },
+      "data": 0
+    },
+    {
+      "name": "met_phi",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "mpx",
+          "type": "real"
+        },
+        {
+          "name": "mpy",
+          "type": "real"
+        }
+      ],
+      "output": {
+        "name": "result",
+        "type": "real",
+        "shape": [
+          2
+        ]
+      },
+      "data": {
+        "nodetype": "array",
+        "content": [
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}
