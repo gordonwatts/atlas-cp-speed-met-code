@@ -65,7 +65,7 @@ taskset -c 0 "$out/build/met_muon_prepare_stock_check" \
   results/reference-observer-full-001/reference.root > "$out/stock.log" 2>&1
 ```
 
-The witness reads only the original file for provider inputs. It compares binary32 p4, raw eta/pT/track masks, Medium, Loose_VarRad and final decisions against A. It independently probes signed isolation, equality thresholds and unavailable fields. The observer did not expose the unused bad-muon diagnostic.
+The witness reads only the original file for provider inputs. It compares binary32 pT, eta, phi, raw eta/pT/track masks, Medium, Loose_VarRad and final decisions against A. The observer's `mu_m` field reports an unavailable auxiliary column as zero. The muon p4 uses the original release's fixed `Muon_v1::m()` instead. It independently probes signed isolation, equality thresholds and unavailable fields. The observer did not expose the unused bad-muon diagnostic.
 
 ## Electron and photon nominal stage
 
@@ -102,4 +102,4 @@ taskset -c 0 "$out/build/met_egamma_prepare_stock_check" \
   "$out/bundle/egamma-probes.tsv" "$input" results/reference-observer-full-001/reference.root > "$out/stock.log" 2>&1
 ```
 
-The witness checks native table/graph evaluations at ROOT-derived probes and then compares the provider with the A observer on all original electron and photon rows. It runs the independent release photon-origin and IsolationCorrectionTool on reached rows to compare every corrected cone, including stored leakage and timing effects. Seventeen source-derived composed fixtures cover partial accept masks, eta and pT equality, two dead-HV periods, cleaning, electron d0, signed isolation, missing or skipped timing and conversion category dispatch. The original file has electron cone 20 and photon cones 20/40, so the other exported cones are checked by their independent table probes. [ROOT 6.40 TH2 interpolation](https://root.cern.ch/doc/v640/TH2_8cxx_source.html#l01338)
+The witness checks native table/graph evaluations at ROOT-derived probes and then compares the provider with the A observer on all original electron and photon rows. Electron and photon mass uses the release's `m()` accessor because the A auxiliary mass branches are zero-filled. It runs the independent release photon-origin and IsolationCorrectionTool on reached rows to compare every corrected cone, including stored leakage and timing effects. Seventeen source-derived composed fixtures cover partial accept masks, eta and pT equality, two dead-HV periods, cleaning, electron d0, signed isolation, missing or skipped timing and conversion category dispatch. The original file has electron cone 20 and photon cones 20/40, so the other exported cones are checked by their independent table probes. [ROOT 6.40 TH2 interpolation](https://root.cern.ch/doc/v640/TH2_8cxx_source.html#l01338)

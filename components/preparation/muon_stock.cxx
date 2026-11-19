@@ -130,7 +130,9 @@ int main(int argc, char** argv) try {
     xAOD::TEvent reader(xAOD::TEvent::kClassAccess);
     require(reader.readFrom(original.get()).isSuccess(), "Read original PHYSLITE");
     TTreeReader reference("analysis", observer.get());
-    TTreeReaderArray<float> pt(reference, "mu_pt"), eta(reference, "mu_eta"), phi(reference, "mu_phi"), m(reference, "mu_m");
+    // The observer writes an unavailable mu_m auxiliary branch as zero.
+    // Muon_v1::m() returns the release constant in its methods and p4.
+    TTreeReaderArray<float> pt(reference, "mu_pt"), eta(reference, "mu_eta"), phi(reference, "mu_phi");
     TTreeReaderArray<std::uint32_t> eta_bits(reference, "mu_selectEta"), pt_bits(reference, "mu_selectPt"),
         track_bits(reference, "mu_trackSelection_medium");
     TTreeReaderArray<char> quality(reference, "mu_good_muon_medium"), iso(reference, "mu_isolated_muon_medium");
@@ -174,9 +176,12 @@ int main(int argc, char** argv) try {
             if (raw_eta_bits != eta_bits[i] || candidate[0] != pt_bits[i] || candidate[1] != track_bits[i] ||
                 candidate[2] != (quality[i] != 0) || candidate[4] != (iso[i] != 0) || candidate[5] != selected ||
                 !exact(muon.pt(), pt[i]) || !exact(muon.eta(), eta[i]) ||
-                !exact(muon.phi(), phi[i]) || !exact(muon.m(), m[i])) {
+                !exact(muon.phi(), phi[i])) {
                 std::cerr << "entry=" << entry << " muon_index=" << i << " eta=" << raw_eta_bits << '/' << eta_bits[i]
-                          << " pt=" << candidate[0] << '/' << pt_bits[i] << " track=" << candidate[1] << '/' << track_bits[i]
+                          << " pt_mask=" << static_cast<Int>(candidate[0]) << '/' << pt_bits[i]
+                          << " track=" << static_cast<Int>(candidate[1]) << '/' << track_bits[i]
+                          << " pt=" << muon.pt() << '/' << pt[i] << " eta_value=" << muon.eta() << '/' << eta[i]
+                          << " phi=" << muon.phi() << '/' << phi[i]
                           << " medium=" << candidate[2] << '/' << int(quality[i])
                           << " iso=" << candidate[4] << '/' << int(iso[i]) << '\n';
                 return 1;

@@ -155,13 +155,13 @@ Values raw_input(const Object& particle, const xAOD::EventInfo& event, const xAO
 constexpr Int pass = 0xffffffff;
 
 struct Species {
-    TTreeReaderArray<float> pt, eta, phi, m;
+    TTreeReaderArray<float> pt, eta, phi;
     TTreeReaderArray<std::uint32_t> gate_eta, oq, pt_gate, extra_pt, track_or_clean;
     TTreeReaderArray<char> id, isolation;
 
     Species(TTreeReader& tree, bool photon)
         : pt(tree, photon ? "pho_pt" : "ele_pt"), eta(tree, photon ? "pho_eta" : "ele_eta"),
-          phi(tree, photon ? "pho_phi" : "ele_phi"), m(tree, photon ? "pho_m" : "ele_m"),
+          phi(tree, photon ? "pho_phi" : "ele_phi"),
           gate_eta(tree, photon ? "pho_selectEta" : "ele_selectEta"), oq(tree, photon ? "pho_goodOQ" : "ele_goodOQ"),
           pt_gate(tree, photon ? "pho_selectPt" : "ele_selectPt"), extra_pt(tree, photon ? "pho_selectPtEta" : "ele_selectPtEta"),
           track_or_clean(tree, photon ? "pho_isClean" : "ele_trackSelection_loose"),
@@ -179,7 +179,9 @@ void compare_row(Long64_t entry, std::size_t i, const Object& raw, const xAOD::E
         stock.pt_gate[i] == pass && stock.extra_pt[i] == pass && stock.id[i] && stock.isolation[i];
 
     const auto p4_ok = exact(candidate[0], stock.pt[i]) && exact(candidate[1], stock.eta[i]) &&
-        exact(candidate[2], stock.phi[i]) && exact(candidate[3], stock.m[i]);
+        // Electron and photon m() are release accessor values. The observer's
+        // unavailable m auxiliary branches are zero-filled by its writer.
+        exact(candidate[2], stock.phi[i]) && exact(candidate[3], raw.m());
     if (!p4_ok || candidate[4] != stock.gate_eta[i] || candidate[5] != stock.oq[i] ||
         candidate[photon ? 6 : 8] != stock.track_or_clean[i] || candidate[7] != stock.pt_gate[i] ||
         candidate[9] != (stock.id[i] != 0) || candidate[10] != (stock.isolation[i] != 0) ||
