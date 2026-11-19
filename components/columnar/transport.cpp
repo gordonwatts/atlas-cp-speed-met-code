@@ -136,10 +136,20 @@ std::optional<double> xAOD_fixed_mass(m::ParticleKind kind)
 struct ObjectRows {
     Offset events;
     P4 p4;
+    std::optional<P4> prepared;
     std::uint32_t key;
     m::ParticleKind kind;
-    ObjectRows(const Columns& cols, const std::string& stem, std::uint32_t key, m::ParticleKind kind)
-        : events(cols,stem + ".o"), p4(cols,stem + ".",xAOD_fixed_mass(kind)), key(key), kind(kind) {}
+    ObjectRows(const Columns& cols, const std::string& stem, std::uint32_t key, m::ParticleKind kind,
+               bool has_preparation=false)
+        : events(cols,stem + ".o"), p4(cols,stem + ".",xAOD_fixed_mass(kind)), key(key), kind(kind)
+    {
+        if (has_preparation) prepared.emplace(cols,stem+".prep.",xAOD_fixed_mass(kind));
+    }
+
+    m::PtEtaPhiM current(std::size_t index) const
+    {
+        return (prepared ? *prepared : p4).row(index);
+    }
 };
 
 m::ObjectLink object_link(std::uint32_t key, std::uint32_t index,
@@ -537,6 +547,12 @@ std::vector<sf::Term> soft_terms(std::span<const m::Term> terms)
     return result;
 }
 
+auto prepared_kinematics(const MetColumnar& bundle,const m::PtEtaPhiM& q,m::ParticleKind kind)
+{
+    return bundle.preparation->at("met_prepared_p4")->evaluate_array({
+        q.pt,q.eta,q.phi,q.mass,static_cast<std::int64_t>(kind)});
+}
+
 a::SignificanceLink significance_link(const Columns& cols, const ObjectRows& owner,
     std::size_t group, std::size_t row, const m::PtEtaPhiM& p4, const MetColumnar& bundle)
 {
@@ -546,8 +562,7 @@ a::SignificanceLink significance_link(const Columns& cols, const ObjectRows& own
     object.pt_mev=p4.pt;
     object.eta=p4.eta;
     object.phi=p4.phi;
-    const auto accessor=bundle.preparation->at("met_prepared_p4");
-    const auto kinematics=accessor->evaluate_array({p4.pt,p4.eta,p4.phi,p4.mass,std::int64_t{group==0}});
+    const auto kinematics=prepared_kinematics(bundle,p4,owner.kind);
     object.p4_px_mev=kinematics.at(0);
     object.p4_py_mev=kinematics.at(1);
     switch (owner.kind) {
@@ -596,13 +611,8 @@ EventObjects prepare_views(const Columns& cols, std::span<const ObjectRows> owne
     for (std::size_t i=0; i<owners.size(); ++i) {
         const auto& owner=owners[i];
         const auto start=owner.events.start(event);
-        std::optional<P4> prepared;
-        std::span<const std::uint8_t> selected;
-        if (i) {
-            const std::string prefix=stems[i];
-            prepared.emplace(cols,prefix+".prep.");
-            selected=cols.get<std::uint8_t>(prefix+".selected");
-        }
+        const auto selected=i ? cols.get<std::uint8_t>(std::string(stems[i])+".selected")
+                              : std::span<const std::uint8_t>{};
         for (auto row=start; row<owner.events.end(event); ++row) {
             auto original=raw_particle(cols,owner,row,row-start);
             packed.originals.push_back(original);
@@ -610,7 +620,7 @@ EventObjects prepare_views(const Columns& cols, std::span<const ObjectRows> owne
                 auto current=original;
                 current.original_link=m::ObjectLink{m::LinkState::valid,original.id};
                 current.id.owner.value|=0x80000000U;
-                current.p4=prepared->row(row);
+                current.p4=owner.current(row);
                 packed.selected[i-1].push_back(current);
             }
         }
@@ -633,23 +643,8 @@ EventObjects prepare_views(const Columns& cols, std::span<const ObjectRows> owne
     return packed;
 }
 
-// AnalysisBase 25.2.117 IParticle energy getters: Jet_v1.cxx:63,
-// Egamma_v1.cxx:86, Muon_v1.cxx:62, TauJet_v3.cxx:87 and Photon_v1.cxx:46.
-// ROOT 6.40.02 PtEtaPhiM4D.h:150-189 and etaMax.h define double E.
-double prepared_getter_energy(const m::PtEtaPhiM& q, m::ParticleKind kind)
-{
-    if (kind==m::ParticleKind::photon) return q.pt*std::cosh(q.eta);
-    constexpr double eta_max=22756.;
-    const double p=q.pt>0 ? q.pt*std::cosh(q.eta)
-        : std::max(std::abs(q.eta)-eta_max,0.);
-    const double p2=p*p;
-    const double mass2=q.mass*q.mass;
-    const double energy2=p2+(q.mass<0 ? -mass2 : mass2);
-    return std::sqrt(energy2>0 ? energy2 : 0.);
-}
-
 void trace_prepared_rows(std::ostream& output,const Columns& cols,
-    std::span<const ObjectRows> owners,std::uint64_t entry,std::size_t event)
+    std::span<const ObjectRows> owners,const MetColumnar& bundle,std::uint64_t entry,std::size_t event)
 {
     constexpr std::array<std::size_t,5> gate_count{0,7,7,1,5};
     for (std::size_t i=0; i<owners.size(); ++i) {
@@ -657,19 +652,16 @@ void trace_prepared_rows(std::ostream& output,const Columns& cols,
         const auto start=owner.events.start(event);
         const std::string stem=stems[i];
         const auto selected=i ? cols.get<std::uint8_t>(stem+".selected") : std::span<const std::uint8_t>{};
-        const auto p4=i ? P4(cols,stem+".prep.") : owner.p4;
         const auto gates=i ? cols.get<std::uint32_t>(stem+".gate") : std::span<const std::uint32_t>{};
         for (auto row=start; row<owner.events.end(event); ++row) {
-            const auto q=p4.row(row);
+            const auto q=owner.current(row);
+            const auto energy=prepared_kinematics(bundle,q,owner.kind).at(2);
             const auto local=row-start;
-            auto physical=q;
-            if (const auto fixed=xAOD_fixed_mass(owner.kind)) physical.mass=*fixed;
             const int pass=i ? (at(selected,row)!=0) : -1;
             output << entry << "\t0\tpreparedGetter\t" << stem << '\t' << local
                 << '\t' << owner.key << '\t' << local << '\t' << pass
-                << '\t' << std::hexfloat << physical.pt << '\t' << physical.eta << '\t'
-                << physical.phi << '\t' << physical.mass << '\t'
-                << prepared_getter_energy(physical,owner.kind) << std::defaultfloat << '\n';
+                << '\t' << std::hexfloat << q.pt << '\t' << q.eta << '\t'
+                << q.phi << '\t' << q.mass << '\t' << energy << std::defaultfloat << '\n';
             output << entry << "\t0\tprepared\t" << stem << '\t' << owner.key << '\t'
                 << row-start << '\t' << (i ? at(selected,row)!=0 : true) << '\t'
                 << q.pt << '\t' << q.eta << '\t' << q.phi << '\t' << q.mass;
@@ -712,7 +704,8 @@ void trace_maker_rows(std::ostream& output,std::uint64_t entry,std::size_t state
 }
 
 a::SignificanceResult calculate_significance(const Columns& cols,std::span<const ObjectRows> owners,
-    const m::Result& result,std::span<const sf::Term> corrected,std::size_t event,MetColumnar& bundle)
+    const m::Result& result,std::span<const sf::Term> corrected,std::size_t event,MetColumnar& bundle,
+    std::ostream* trace,std::uint64_t entry,std::size_t state)
 {
     std::vector<std::vector<a::SignificanceLink>> links(result.terms.size());
     std::vector<a::SignificanceTerm> input;
@@ -723,9 +716,16 @@ a::SignificanceResult calculate_significance(const Columns& cols,std::span<const
         if (i<result.terms.size() && sg::term_action(term.name,term.source)==sg::TermAction::constituents) {
             for (const auto& contributor:result.terms[i].contributors) {
                 const auto [group,row]=owner_row(owners,contributor.current,event);
-                const auto prepared=group ? P4(cols,std::string(stems[group])+".prep.").row(row)
-                                          : owners[group].p4.row(row);
-                links[i].push_back(significance_link(cols,owners[group],group,row,prepared,bundle));
+                const auto& owner=owners[group];
+                const auto prepared=owner.current(row);
+                auto link=significance_link(cols,owner,group,row,prepared,bundle);
+                if (trace && link.egamma) {
+                    *trace << entry << '\t' << state << "\tegammaSignificanceGetter\t" << term.name
+                           << '\t' << stems[group] << '\t' << contributor.current.index << '\t'
+                           << std::hexfloat << prepared.mass << '\t' << link.egamma->energy_mev
+                           << std::defaultfloat << '\n';
+                }
+                links[i].push_back(std::move(link));
             }
             linked=links[i];
         }
@@ -758,10 +758,10 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
         const MetRows core(cols,"core"), truth(cols,"truth");
         const std::array<ObjectRows,5> objects{
             ObjectRows(cols,"jet",jets_key,m::ParticleKind::jet),
-            ObjectRows(cols,"electron",electrons_key,m::ParticleKind::electron),
-            ObjectRows(cols,"photon",photons_key,m::ParticleKind::photon),
-            ObjectRows(cols,"tau",taus_key,m::ParticleKind::tau),
-            ObjectRows(cols,"muon",muons_key,m::ParticleKind::muon)};
+            ObjectRows(cols,"electron",electrons_key,m::ParticleKind::electron,true),
+            ObjectRows(cols,"photon",photons_key,m::ParticleKind::photon,true),
+            ObjectRows(cols,"tau",taus_key,m::ParticleKind::tau,true),
+            ObjectRows(cols,"muon",muons_key,m::ParticleKind::muon,true)};
         if (association.events.size()!=events || core.events.size()!=events || truth.events.size()!=events
             || jet_input.vertex_events.size()!=events) {
             throw std::invalid_argument("Full C event shape mismatch");
@@ -780,7 +780,7 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
         std::vector<float> scores(objects.front().events.length());
         for (std::size_t event=0; event<events; ++event) {
             const auto view=prepare_views(cols,objects,event,jet_input,*bundle,scores);
-            if (trace_path) trace_prepared_rows(trace,cols,objects,first_entry+event,event);
+            if (trace_path) trace_prepared_rows(trace,cols,objects,*bundle,first_entry+event,event);
             const auto core_rows=core.event(event);
             const auto truth_rows=truth.event(event);
             std::vector<sf::Term> truth_terms;
@@ -826,7 +826,8 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
                 const auto final=bundle->soft->build_final(rebuilt);
                 if (final.status!=sf::Status::success) throw std::runtime_error("C Final failed "+stamp);
                 rebuilt.push_back({sf::final_name,sf::final_source,final.momentum,std::nullopt});
-                const auto significance=calculate_significance(cols,objects,maker,rebuilt,event,*bundle);
+                const auto significance=calculate_significance(cols,objects,maker,rebuilt,event,*bundle,
+                    trace_path ? &trace : nullptr,first_entry+event,state);
                 if (significance.reduction.status!=sg::Status::success) {
                     throw std::runtime_error("C significance status "+
                         std::to_string(static_cast<int>(significance.reduction.status))+" "+stamp);
@@ -890,8 +891,14 @@ public:
         const double pt=std::get<double>(values.at(inputs_[0]));
         const double eta=std::get<double>(values.at(inputs_[1]));
         double phi=std::get<double>(values.at(inputs_[2]));
-        const double m=std::get<double>(values.at(inputs_[3]));
-        const bool jet=std::get<std::int64_t>(values.at(inputs_[4]))!=0;
+        const double mass=std::get<double>(values.at(inputs_[3]));
+        const auto input_kind=std::get<std::int64_t>(values.at(inputs_[4]));
+        if (input_kind<static_cast<int>(m::ParticleKind::jet) ||
+            input_kind>static_cast<int>(m::ParticleKind::muon)) {
+            throw std::invalid_argument("Invalid prepared P4 particle kind");
+        }
+        const auto kind=static_cast<m::ParticleKind>(input_kind);
+        const bool jet=kind==m::ParticleKind::jet;
         // JetFourMom_t normalizes phi. TLorentzVector p4 sets abs(pt).
         if (jet && (phi<=-std::numbers::pi || phi>std::numbers::pi)) {
             phi-=std::floor(phi/(2*std::numbers::pi)+.5)*2*std::numbers::pi;
@@ -899,8 +906,18 @@ public:
         const double cartesian_pt=jet ? pt : std::abs(pt);
         out[0]=cartesian_pt*std::cos(phi);
         out[1]=cartesian_pt*std::sin(phi);
-        const double spatial=pt>0 ? pt*std::cosh(eta) : 0.;
-        const double square=spatial*spatial+(m>=0 ? m*m : -m*m);
+        // AnalysisBase 25.2.117 Photon_v1.cxx:46 overrides e(). Jet_v1.cxx:63,
+        // Egamma_v1.cxx:86, Muon_v1.cxx:62 and TauJet_v3.cxx:87 delegate to
+        // ROOT 6.40.02 PtEtaPhiM4D.h:150-189 and etaMax.h for the double e().
+        if (kind==m::ParticleKind::photon) {
+            out[2]=pt*std::cosh(eta);
+            return;
+        }
+        constexpr double eta_max=22756.;
+        const double momentum=pt>0 ? pt*std::cosh(eta)
+            : eta>eta_max ? eta-eta_max : eta < -eta_max ? -eta-eta_max : 0.;
+        const double mass2=mass*mass;
+        const double square=momentum*momentum+(mass>=0 ? mass2 : -mass2);
         out[2]=std::sqrt(square>0 ? square : 0.);
     }
 private:
@@ -923,12 +940,12 @@ private:
 void register_transport_nodes(correction::PluginRegistry& registry)
 {
     using V=correction::Variable::VarType;
-    registry.register_node("atlas.met.prepared_p4",1,[](const correction::PluginConfig& cfg,const correction::PluginContext& ctx){
+    registry.register_node("atlas.met.prepared_p4",2,[](const correction::PluginConfig& cfg,const correction::PluginContext& ctx){
         cfg.require_keys({});
         if (ctx.output_size()!=3 || ctx.child_count()) throw std::invalid_argument("Invalid p4 transport schema");
         return std::make_shared<P4Access>(std::array{
             ctx.input_index("pt",V::real),ctx.input_index("eta",V::real),ctx.input_index("phi",V::real),
-            ctx.input_index("mass",V::real),ctx.input_index("jet",V::integer)});
+            ctx.input_index("mass",V::real),ctx.input_index("particle_kind",V::integer)});
     });
     registry.register_node("atlas.met.track_pt",1,[](const correction::PluginConfig& cfg,const correction::PluginContext& ctx){
         cfg.require_keys({});

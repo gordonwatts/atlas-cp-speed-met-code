@@ -150,6 +150,7 @@ def trace_match(stock, config, entries, states, stock_file, given_file, stock_ge
                 check("seed",entry,seed == expected,expected,seed)
             check("seed_length",entry,len(observed_seeds) == len(states),len(states),len(observed_seeds))
 
+            stock_getter_lookup = None
             if getter_stream is not None:
                 stock_entry, getter_expected = next(getter_stream, (None, []))
                 check("getter_entry",entry,stock_entry==entry,entry,stock_entry)
@@ -157,6 +158,7 @@ def trace_match(stock, config, entries, states, stock_file, given_file, stock_ge
                 sort_key = lambda row: (row[0],int(row[1]))
                 getter_expected.sort(key=sort_key)
                 getter_actual.sort(key=sort_key)
+                stock_getter_lookup = {(row[0],int(row[1])): row for row in getter_expected}
                 check("getter_count",entry,len(getter_expected)==len(getter_actual),
                       len(getter_expected),len(getter_actual))
                 for left,right in zip_longest(getter_expected,getter_actual):
@@ -210,12 +212,16 @@ def trace_match(stock, config, entries, states, stock_file, given_file, stock_ge
                     check(label,entry,numeric_match(stock_p4,given,quantity),stock_p4,given)
 
             by_state = {}
+            egamma_by_state = {}
             for state,action,values in observed[1]:
                 if action == "contributor":
                     by_state.setdefault(state,[]).append(values)
+                if action == "egammaSignificanceGetter":
+                    egamma_by_state.setdefault(state,[]).append(values)
             for state,label in enumerate(states):
                 links,weights = stock_links[label]
                 want = []
+                want_egamma = []
                 for i,(term,(prefix,_)) in enumerate(TERMS.items()):
                     for j,link in enumerate(links[entry][i]):
                         role = ROLES[prefix]
@@ -223,11 +229,27 @@ def trace_match(stock, config, entries, states, stock_file, given_file, stock_ge
                         check("stock_shallow_owner",entry,stock_key.setdefault(role,key)==key,stock_key[role],key)
                         weight = weights[entry][i][j] if weights[entry][i] else None
                         want.append((term,raw_key[role] | 2**31,raw_key[role],link["m_persIndex"],weight))
+                        if stock_getter_lookup is not None and role in ("electron","photon"):
+                            index = link["m_persIndex"]
+                            values = stock_getter_lookup[(role,index)]
+                            want_egamma.append([term,role,str(index),*values[-2:]])
                 have = [(term,int(current),int(raw),int(index),float(weight) if weight else None)
                         for term,current,raw,index,weight in by_state.get(state,[])]
                 check("ordered_constituent_count",entry,len(want)==len(have),len(want),len(have))
                 for left,right in zip_longest(want,have):
                     check("ordered_constituent_link_weight",entry,left == right,left,right)
+                if stock_getter_lookup is not None:
+                    got_egamma = egamma_by_state.get(state,[])
+                    check("significance_egamma_getter_count",entry,len(want_egamma)==len(got_egamma),
+                          len(want_egamma),len(got_egamma))
+                    for left,right in zip_longest(want_egamma,got_egamma):
+                        if left is None or right is None:
+                            check("significance_egamma_getter_identity",entry,False,left,right)
+                            continue
+                        check("significance_egamma_getter_identity",entry,left[:3]==right[:3],left[:3],right[:3])
+                        for name,want_value,got_value in zip(("mass","energy"),left[-2:],right[-2:],strict=True):
+                            exact = struct.pack("=d",float.fromhex(want_value)) == struct.pack("=d",float.fromhex(got_value))
+                            check(f"significance_egamma_production_{name}",entry,exact,want_value,got_value)
     return {"compared":compared,"failures":failures,"first_failures":examples,
             "stock_getters":str(stock_getters) if stock_getters is not None else None,
             "worst_p4_delta":worst_p4_delta,

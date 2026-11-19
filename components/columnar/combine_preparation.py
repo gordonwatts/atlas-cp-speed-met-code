@@ -4,20 +4,20 @@ from pathlib import Path
 import typer
 
 
-def extension(key, kind, inputs, components=None):
+def extension(key, kind, inputs, components=None, version=1):
     output = {"name":"value","type":"real"}
-    data = {"nodetype":"extension","type":kind,"version":1,"config":{}}
+    data = {"nodetype":"extension","type":kind,"version":version,"config":{}}
     if components:
         output["shape"] = [components]
         data["output_shape"] = [components]
-    return {"name":key,"version":1,"output":output,"data":data,
+    return {"name":key,"version":version,"output":output,"data":data,
             "inputs":[{"name":name,"type":dtype} for name,dtype in inputs]}
 
 
 def main(output: Path, inputs: list[Path]):
     corrections = [
         extension("met_prepared_p4","atlas.met.prepared_p4",
-                  [(k,"real") for k in ("pt","eta","phi","mass")]+[("jet","int")],3),
+                  [(k,"real") for k in ("pt","eta","phi","mass")]+[("particle_kind","int")],3,version=2),
         extension("met_track_pt","atlas.met.track_pt",
                   [(k,"real") for k in ("qop","theta","phi")]+[("valid","int")]),
     ]
