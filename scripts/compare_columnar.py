@@ -72,13 +72,14 @@ def compare(stock_dir: Path, candidate: Path, expected_events: int) -> None:
         expected_event = stock["eventNumber"].array(entry_stop=n, library="np")
         assert observed["event_number"].dtype == expected_event.dtype
         np.testing.assert_array_equal(observed["event_number"], expected_event)
-        coverage = {"event_number": True}
+        assert observed["entry"].dtype == np.dtype("u8")
+        np.testing.assert_array_equal(observed["entry"], np.arange(n, dtype="u8"))
+        coverage = {"event_number": True, "entry": True}
         for field, stock_name in (("run_number", "runNumber"), ("mc_channel_number", "mcChannelNumber")):
-            coverage[field] = field in observed
-            if coverage[field]:
-                expected_identity = stock[stock_name].array(entry_stop=n, library="np")
-                assert observed[field].dtype == expected_identity.dtype
-                np.testing.assert_array_equal(observed[field], expected_identity)
+            expected_identity = stock[stock_name].array(entry_stop=n, library="np")
+            assert observed[field].dtype == expected_identity.dtype
+            np.testing.assert_array_equal(observed[field], expected_identity)
+            coverage[field] = True
         report = {
             "events": n, "states": states, "identity_observation_coverage": coverage,
             "states_checked": {}, "first_bin_event_mismatch": None,
