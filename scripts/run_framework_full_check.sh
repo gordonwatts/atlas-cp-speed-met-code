@@ -19,7 +19,7 @@ export ATLAS_MET_FRAMEWORK_BRIDGE="$build/libAtlasMetFramework.so"
 export ATLAS_MET_PROVIDER="$build/maker_adapter/libatlas_met_maker_provider.so"
 export ATLAS_MET_MAKER_PAYLOAD="$repo/results/maker-component-001/maker.json"
 export ATLAS_MET_SOFT_PAYLOAD="$repo/results/soft-component-exact-001/bundle/corrections.json"
-export ATLAS_MET_SIGNIFICANCE_PAYLOAD="$repo/results/significance-component-exact-001/bundle/corrections.json"
+export ATLAS_MET_SIGNIFICANCE_PAYLOAD="$repo/results/significance-event-payload-001/met_significance_event.json"
 export ATLAS_MET_STAGE=full ATLAS_MET_DISPATCH_AUDIT=1
 case "$mode" in
   trace) export ATLAS_MET_MAKER_TRACE_FILE="$out/maker-trace.tsv";;
@@ -28,5 +28,5 @@ case "$mode" in
 esac
 input=$(cat "$repo/config/input.txt")
 cd "$out"
-timeout --signal=TERM --kill-after=5s 90s python "$repo/components/framework/bridge_entry.py" --direct-driver -i "$input" -t "$repo/config/reference-smoke.yaml" -o candidate -e "$events" --dump-full-config
+timeout --signal=TERM --kill-after=5s "$((60 + events / 100))s" python "$repo/components/framework/bridge_entry.py" --direct-driver -i "$input" -t "$repo/config/reference-smoke.yaml" -o candidate -e "$events" --dump-full-config
 ' bash "$repo" "$build" "$out" "$events" "$mode" > "$out/job.log" 2>&1

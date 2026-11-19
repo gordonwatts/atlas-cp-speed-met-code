@@ -11,10 +11,7 @@ def main(exported_primitives: Path, output: Path) -> None:
     tables = {}
     for kind in ("jet", "egamma", "muon", "tau"):
         op = next(item for item in data["corrections"] if item["name"] == f"{kind}_resolution")
-        table = Path(op["data"]["config"]["table"])
-        if not table.is_absolute():
-            table = exported_primitives.resolve().parent / table
-        tables[kind] = str(table.resolve(strict=True))
+        tables[kind] = op["data"]["config"]["table"]
     payload = {
         "schema_version": 3,
         "corrections": [{
