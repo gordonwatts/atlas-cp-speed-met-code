@@ -56,8 +56,14 @@ def save(histogram, labels, entries, output):
                  counts=counts, sumw=sumw, sumw2=sumw2)
 
 
-def projected_fields(tree):
-    additional = [name for name in ADDITIONAL if name in tree]
+def read_branch_names(tree):
+    # The configured names use exact ROOT fNames, including dots. Recursive
+    # unqualified keys reproduce lookup by those names in descendant branches.
+    return set(tree.keys(recursive=True, full_paths=False))
+
+
+def projected_fields(available):
+    additional = [name for name in ADDITIONAL if name in available]
     sampling = JET + "EnergyPerSampling"
     if JET + "PSFrac" in additional and sampling in additional:
         additional.remove(sampling)
@@ -159,11 +165,12 @@ def main(
                     raise ValueError("This payload and the event-local link inventory are pinned to the original file")
                 tree = original["CollectionTree"]
                 end = tree.num_entries if stop is None else min(stop,tree.num_entries)
-                fields = projected_fields(tree)
+                available = read_branch_names(tree)
+                fields = projected_fields(available)
                 link_reader = MemberwiseJets(bridge,tree[ASSOC][ASSOC+"jetLink"])
                 if runtime_record is not None:
                     input_layout = {"tree":"CollectionTree","loaded_branches":fields,
-                                    "supported_but_absent":[f for f in ADDITIONAL if f not in tree],
+                                    "supported_but_absent":[f for f in ADDITIONAL if f not in available],
                                     "nested_associations":[ASSOC+f for f in ASSOC_FIELDS],
                                     "memberwise_basket":[ASSOC+"jetLink"],"split_leaves":{}}
                 for first in range(0,end,chunk_size):
