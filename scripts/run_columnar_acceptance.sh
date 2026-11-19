@@ -5,6 +5,16 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 out=$1
 snapshot=$2
 histpy=$3
+shift 3
+maker_reuse=0
+chunk_args=()
+while (($#)); do
+  case "$1" in
+    --maker-reuse) maker_reuse=1; shift ;;
+    --chunk-size) chunk_args=(--chunk-size "${2:?missing chunk size}"); shift 2 ;;
+    *) printf 'Unexpected acceptance flag %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
 mkdir -- "$out"
 cd "$repo"
 source="$snapshot/source/components/columnar"
@@ -27,6 +37,7 @@ for scope in full nominal corr; do
     mode=(--trace "$dest/c-status.tsv")
     trace=(--stock-trace "$repo/results/reference-status-$scope-001/status.tsv" --candidate-trace "$dest/c-status.tsv"
            --stock-getters "$repo/results/reference-prepared-full-001/prepared-p4.tsv")
+    if ((maker_reuse)); then trace+=(--maker-reuse); fi
   fi
   if [ "$scope" = corr ]; then
     mode+=(--correlated-diagnostic)
@@ -34,7 +45,7 @@ for scope in full nominal corr; do
     "${clean[@]}" taskset -c 0 "$histpy" scripts/histogram_reference.py "$stock/reference.root" "$stock/hist-reference.root" "$stock_hist" > "$dest/compare.log" 2>&1
   fi
   "${clean[@]}" taskset -c 0 "$histpy" "$source/met_demo.py" "$input" "$dest/c.npz" --runtime "$runtime" \
-    --stop 20000 --observables "$dest/c-observables.npz" --runtime-record "$dest/c-runtime.json" "${mode[@]}" > "$dest/job.log" 2>&1
+    --stop 20000 --observables "$dest/c-observables.npz" --runtime-record "$dest/c-runtime.json" "${chunk_args[@]}" "${mode[@]}" > "$dest/job.log" 2>&1
   status=0
   "${clean[@]}" "PYTHONPATH=$repo/scripts" taskset -c 0 "$histpy" "$source/compare.py" "$stock" "$stock_hist" \
     "$dest/c-observables.npz" "$dest/c.npz" "$dest/compare.json" "${trace[@]}" --expected-events 20000 >> "$dest/compare.log" 2>&1 || status=$?

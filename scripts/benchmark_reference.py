@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-import resource
 import statistics
 import subprocess
 import sys
@@ -22,11 +21,6 @@ SCOPES = ("stored", "nominal", "full")
 def snapshot_cpu() -> list[int]:
     line = next(line for line in Path("/proc/stat").read_text().splitlines() if line.startswith(f"cpu{CPU} "))
     return [int(value) for value in line.split()[1:]]
-
-
-def cpu_seconds() -> float:
-    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-    return usage.ru_stime + usage.ru_utime
 
 
 def process_children(process: Path) -> list[str]:
@@ -99,24 +93,26 @@ def run(
     finished = threading.Event()
     with log.open("x") as output:
         before_host = snapshot_cpu()
-        before_cpu = cpu_seconds()
         start = time.perf_counter_ns()
         child = subprocess.Popen(command, cwd=cwd, env=environment, stdout=output, stderr=subprocess.STDOUT)
         sampler = threading.Thread(
             target=monitor, args=(child.pid, finished, events, probe_names, mappings, sample_seconds, start, log)
         )
         sampler.start()
-        status = child.wait()
+        _, wait_status, usage = os.wait4(child.pid, 0)
         end = time.perf_counter_ns()
+        child.returncode = os.waitstatus_to_exitcode(wait_status)
+        status = child.returncode
         finished.set()
         sampler.join()
-        process_cpu = cpu_seconds() - before_cpu
+        process_cpu = usage.ru_utime + usage.ru_stime
         after_host = snapshot_cpu()
     observation = {
         "arguments": command,
         "exit_code": status,
         "wall_seconds": (end - start) * 1e-9,
         "process_cpu_seconds": process_cpu,
+        "peak_rss_kib": usage.ru_maxrss,
         "host_cpu0_delta_ticks": [after - before for before, after in zip(before_host, after_host, strict=True)],
         "samples": events,
         "mapped_named_libraries": sorted(mappings),
