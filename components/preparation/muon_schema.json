@@ -807,24 +807,24 @@
         "nodetype": "binning",
         "input": "eta_bits",
         "edges": [
-          4294967295,
-          4294967296
+          4294967295.0,
+          4294967296.0
         ],
         "content": [
           {
             "nodetype": "binning",
             "input": "pt_bits",
             "edges": [
-              4294967295,
-              4294967296
+              4294967295.0,
+              4294967296.0
             ],
             "content": [
               {
                 "nodetype": "binning",
                 "input": "track_bits",
                 "edges": [
-                  4294967295,
-                  4294967296
+                  4294967295.0,
+                  4294967296.0
                 ],
                 "content": [
                   {

@@ -97,8 +97,8 @@ public:
         : sf1_(read_scale(config.string("sf_1p"))), sf3_(read_scale(config.string("sf_3p"))),
           calo_(resolution::read_tau_data(config.string("calo_graphs"))),
           min_pt_gev_(config.real("min_pt_gev")),
-          eta_regions_{config.real("eta_low"), config.real("eta_crack_low"), config.real("eta_crack_high"),
-                       config.real("eta_high")} {
+          eta_regions_{float(config.real("eta_low")), float(config.real("eta_crack_low")), float(config.real("eta_crack_high")),
+                       float(config.real("eta_high"))} {
         for (std::size_t i = 0; i < reals_.size(); ++i) reals_[i] = ctx.input_index(real_fields[i], VarType::real);
         for (std::size_t i = 0; i < ints_.size(); ++i) ints_[i] = ctx.input_index(int_fields[i], VarType::integer);
     }
@@ -184,7 +184,7 @@ private:
     resolution::Histogram2 sf1_, sf3_;
     resolution::TauData calo_;
     double min_pt_gev_;
-    std::array<double, 4> eta_regions_;
+    std::array<float, 4> eta_regions_;
     std::array<std::size_t, real_fields.size()> reals_{};
     std::array<std::size_t, int_fields.size()> ints_{};
 };
