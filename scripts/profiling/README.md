@@ -8,7 +8,8 @@ Use absolute paths and fresh output directories. Set `stage` to the validated po
 
 ```bash
 cd /home/gwatts/atlas-cp-speed/met-20261119
-stage="$PWD/results/columnar-portable-002"  # use the actual accepted stage
+stage="$PWD/results/columnar-m26-portable-001"  # use the actual accepted stage
+chunk=5000  # use the measured stage's chunk size
 py="$stage/pip-env/bin/python"
 read -r input < config/input.txt
 full="$PWD/results/reference-histogram-transport-001/histogram.npz"
@@ -18,7 +19,7 @@ native_result="$PWD/results/c-native-diagnostic-001"
 common=("$py" scripts/profiling/measure.py
         --python "$py" --demo "$stage/bundle/met_demo.py"
         --input "$input" --bundle-manifest "$stage/bundle/bundle.json"
-        --analysis-cpu 0 --collector-cpu 1)
+        --analysis-cpu 0 --collector-cpu 1 --chunk-size "$chunk")
 "${common[@]}" phases --out "$phase_result" --accepted-nominal "$nominal" --accepted-full "$full"
 passes=$("${common[@]}" estimate "$phase_result/summary.json")
 "${common[@]}" native --out "$native_result" --accepted "$full" --repeats "$passes" --pmu
@@ -27,7 +28,7 @@ passes=$("${common[@]}" estimate "$phase_result/summary.json")
 
 ## Elapsed phase boundary
 
-The phase command runs one direct subprocess and one diagnostic subprocess for each mode. The direct control launches the unchanged visible entry point with the standard 2,000-entry chunks. The diagnostic subprocess independently compiles an in-memory copy of the same script. Structural anchors fail if its accepted entry-point shape changed. The AST adds coarse phase contexts and per-pass receipts to the imports and original operations. Capture/trace/runtime-record options stay off. There is no patch to a production or installed source file.
+The phase command runs one direct subprocess and one diagnostic subprocess for each mode. The direct control launches the unchanged visible entry point with the specified original-entry chunk size. The diagnostic subprocess independently compiles an in-memory copy of the same script. Structural anchors fail if its accepted entry-point shape changed. The AST adds coarse phase contexts and per-pass receipts to the imports and original operations. Capture/trace/runtime-record options stay off. There is no patch to a production or installed source file.
 
 - Linux `wait4` records elapsed and process tree user/system CPU. Direct elapsed includes interpreter startup, imports, initialization, original input and output close. In sampled mode the process tree includes the collector. The diagnostic Python process separately records its own CPU.
 - Named phases cover imports, initialization and configure, original opening/metadata, reading and decoding associations and branch fields, raw packing, direct nominal projection and its named native calls, terms/significance evaluation, histogram book/fill/save, and native close. Nested scopes subtract their children from exclusive time. The phase receipt also publishes inclusive totals with the original overlap.
