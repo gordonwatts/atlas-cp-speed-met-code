@@ -552,9 +552,11 @@ std::shared_ptr<const PluginNode> make_node(const PluginConfig& config, const Pl
 }
 } // namespace
 
-void atlas::met::preparation::register_muon_nodes(correction::PluginRegistry& registry) {
+namespace atlas::met::preparation {
+void register_muon_nodes(correction::PluginRegistry& registry) {
     static_assert(correction::plugin_api_version == 4);
     registry.register_node("atlas.met.preparation.muon.eta", 1, make_node<EtaSelection>);
     registry.register_node("atlas.met.preparation.muon.track_roles", 1, make_node<TrackRoles>);
     registry.register_node("atlas.met.preparation.muon.after_calibration", 1, make_node<AfterCalibration>);
 }
+} // namespace atlas::met::preparation
