@@ -54,7 +54,7 @@ void same(s::Momentum candidate, const xAOD::MissingET& original, std::string_vi
         || !matches(candidate.sumet, original.sumet())) {
         std::cerr << label << " stock=" << std::hexfloat << original.mpx() << ','
                   << original.mpy() << ',' << original.sumet() << " provider="
-                  << candidate.mpx << ',' << candidate.mpy << ',' << candidate.sumet() << '\n';
+                  << candidate.mpx << ',' << candidate.mpy << ',' << candidate.sumet << '\n';
         throw std::runtime_error("Stored soft or Final components differ");
     }
 }
