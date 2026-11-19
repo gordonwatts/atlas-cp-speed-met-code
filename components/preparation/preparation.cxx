@@ -6,10 +6,12 @@ namespace atlas::met::preparation {
 
 void register_tau(correction::PluginRegistry&);
 void register_muon_nodes(correction::PluginRegistry&);
+void register_egamma_nodes(correction::PluginRegistry&);
 
 void register_preparation_nodes(correction::PluginRegistry& registry) {
     register_tau(registry);
     register_muon_nodes(registry);
+    register_egamma_nodes(registry);
 }
 
 } // namespace atlas::met::preparation

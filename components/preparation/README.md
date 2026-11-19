@@ -66,3 +66,40 @@ taskset -c 0 "$out/build/met_muon_prepare_stock_check" \
 ```
 
 The witness reads only the original file for provider inputs. It compares binary32 p4, raw eta/pT/track masks, Medium, Loose_VarRad and final decisions against A. It independently probes signed isolation, equality thresholds and unavailable fields. The observer did not expose the unused bad-muon diagnostic.
+
+## Electron and photon nominal stage
+
+Use the same registered API4 provider and load the exported `egamma.json`. `egamma_schema.py` lists in order the real and integer fields for `electron_prepare` and `photon_prepare`, and the output components. Supply binary32 source decorations widened to reals. Missing link inputs follow the availability flags. The final three reals and final integer are private child-evaluation slots. Supply zero. The data are for the recorded MC campaign.
+
+| Fields | Original owner |
+| --- | --- |
+| p4, OQ, author, ID, and photon cleaning | Original AnalysisElectrons or AnalysisPhotons. ID is the corresponding `DFCommonElectronsLHLooseBL` or `DFCommonPhotonsIsEMTight` char. Clean is `DFCommonPhotonsCleaning`. Missing char is -1 and fails when reached. |
+| cluster kinematics, moments and samplings | First resolvable index-0 `caloClusterLinks` target in `egammaClusters`. The eta selection uses the computed layer-2 eta. Use actual raw eta and phi for cluster coordinates. For each of sampling slots 1/2/3 and 5/6/7, use the population count of lower pattern bits to find the packed slot in `e_sampl` or `eta_sampl`. Use -999 for a present sampling with an out-of-range packed index. Supply zero for a sampling absent from the pattern. Supply `has_calo_moments` only when both calorimeter-frame moments can be read. |
+| event / PV | Actual `runNumber` and separate `RandomRunNumber` (-1 if missing) on EventInfo. Choose first PriVtx in original PrimaryVertices order as for muons. Set `has_pv=0` with no such vertex. Electron track uses beamPosSigmaX/Y/XY and PV z or zero. |
+| calorimeter isolation | Per-cone raw `topoetcone20/30/40`, corresponding `topoetconeXXptCorrection`, and the `Eadded_Lr2/Lr3` per-object floats. Isolation/old-leak availability bits for cones 20/30/40 are 0/1/2. Timing availability bits are 0/1. |
+| track isolation and electron track | Track isolation is `ptvarcone30_Nonprompt_All_MaxWeightTTVALooseCone_pt1000` for electron or `ptcone20` for photon. Its availability is bit 3 of the isolation mask. For an electron use first index-0 `trackParticleLinks` target in `GSFTrackParticles`, including d0 variance from index 0 of the covariance diagonal and size -1 for absent. |
+| photon conversion | First index-0 `vertexLinks` target in `GSFConversionVertices`, with x, y and optional conversion pt1 and pt2. Follow its first two trackParticleLinks to raw tracks. Pass separate link validity, pixel and SCT summaries (-1 for missing) and qOverP, theta, phi. The fixed schema has no first-measurement perigee arrays, so the stock fallback when pt1/pt2 are unavailable computes pT from perigee. |
+
+The shared node reproduces the uint32 release accept masks, including partial bits of early eta, OQ, cleaning and track cuts. The final boolean follows the configured METMaker predicate. Photon origin correction rewrites float pT and eta after its eta, OQ and cleaning stages when a PriVtx exists. Electron nominal momentum remains the input momentum per the recorded calibration configuration. All reached topo cones receive the old-to-new leakage and Run 3 timing updates before track/ID/isolation selection.
+
+The three native scalar children of the preparation node evaluate TF1 translations, the trouble-category TGraph, and the hData TProfile2D displacement. TFormula payloads preserve the active REL22 power/log and REL21 quadratic forms. Profile interpolation uses bin centres and native MultiBinning contents with the release's boundary and precision rules. `egamma_pointing_depth` and the four per-species leakage corrections also expose these lookups to standalone checks. The exporter validates initialized settings and the SHA256 of each resolved input file.
+
+Use the same pinned release and build environment above with a fresh evidence directory:
+
+```bash
+out="$PWD/results/egamma-preparation-001"
+mkdir -- "$out"
+taskset -c 0 python components/preparation/export_egamma.py \
+  --reference-config results/reference-observer-full-001/full_config.json \
+  --output-dir "$out/bundle" > "$out/export.log" 2>&1
+taskset -c 0 cmake -S components/preparation -B "$out/build" \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+  -Dcorrectionlib_DIR="$MET_CORE_CONFIG" -DMET_PREPARATION_STOCK_CHECK=ON > "$out/configure.log" 2>&1
+taskset -c 0 cmake --build "$out/build" --parallel 1 > "$out/build.log" 2>&1
+read -r input < config/input.txt
+taskset -c 0 "$out/build/met_egamma_prepare_stock_check" \
+  "$out/build/libmet_preparation_provider.so" "$out/bundle/egamma.json" \
+  "$out/bundle/egamma-probes.tsv" "$input" results/reference-observer-full-001/reference.root > "$out/stock.log" 2>&1
+```
+
+The witness checks native table/graph evaluations at ROOT-derived probes and then compares the provider with the A observer on all original electron and photon rows. It runs the independent release photon-origin and IsolationCorrectionTool on reached rows to compare every corrected cone, including stored leakage and timing effects. [ROOT 6.40 TH2 interpolation](https://root.cern.ch/doc/v640/TH2_8cxx_source.html#l01338)
