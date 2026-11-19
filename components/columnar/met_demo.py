@@ -25,7 +25,7 @@ import numpy as np
 import typer
 import uproot
 
-from atlas_met_columnar import ASSOC, RAW_BRANCHES, MemberwiseJets, Native, pack_raw, read_associations
+from atlas_met_columnar import ASSOC, ASSOC_FIELDS, RAW_BRANCHES, MemberwiseJets, Native, pack_raw, read_associations
 from atlas_met_prepare import ADDITIONAL, prepare_chunk
 
 UUID = "79ee6652-311f-11f1-aa37-0445010abeef"
@@ -154,14 +154,16 @@ def main(
                 fields = list(dict.fromkeys([*RAW_BRANCHES,*(f for f in ADDITIONAL if f in tree)]))
                 link_reader = MemberwiseJets(bridge,tree[ASSOC][ASSOC+"jetLink"])
                 if runtime_record is not None:
-                    from atlas_met_columnar import ASSOC_FIELDS
                     input_layout = {"tree":"CollectionTree","loaded_branches":fields,
                                     "supported_but_absent":[f for f in ADDITIONAL if f not in tree],
                                     "nested_associations":[ASSOC+f for f in ASSOC_FIELDS],
-                                    "memberwise_basket":[ASSOC+"jetLink"]}
+                                    "memberwise_basket":[ASSOC+"jetLink"],"split_leaves":{}}
                 for first in range(0,end,chunk_size):
                     last = min(first+chunk_size,end)
                     raw = tree.arrays(fields,entry_start=first,entry_stop=last,library="ak",how=dict)
+                    if runtime_record is not None and first == 0:
+                        input_layout["split_leaves"] = {name: list(children) for name,children in raw.items()
+                                                         if isinstance(children,dict)}
                     assoc = read_associations(tree,first,last)
                     buffers = pack_raw(raw,assoc,link_reader.read(first,last))
                     # Nominal corrections are explicitly selected by their declared names
