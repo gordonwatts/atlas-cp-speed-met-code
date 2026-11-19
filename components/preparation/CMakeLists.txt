@@ -44,7 +44,7 @@ if(MET_PREPARATION_STOCK_CHECK)
         AnalysisBase::xAODRootAccess AnalysisBase::xAODMuon AnalysisBase::xAODEventInfo
         AnalysisBase::xAODTracking ROOT::TreePlayer)
 
-    add_executable(met_egamma_prepare_stock_check egamma_stock.cxx)
+    add_executable(met_egamma_prepare_stock_check egamma_stock.cxx egamma_boundaries.cxx)
     target_compile_features(met_egamma_prepare_stock_check PRIVATE cxx_std_23)
     target_compile_definitions(met_egamma_prepare_stock_check PRIVATE XAOD_STANDALONE XAOD_ANALYSIS)
     target_link_libraries(met_egamma_prepare_stock_check PRIVATE correctionlib

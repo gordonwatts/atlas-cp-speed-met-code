@@ -252,6 +252,8 @@ void configure(CP::IsolationCorrectionTool& tool, bool photon) {
 }
 } // namespace
 
+std::size_t egamma_boundaries(const correction::CorrectionSet&);
+
 int main(int argc, char** argv) try {
     require(argc == 6, "Usage: met_egamma_prepare_stock_check PLUGIN EGAMMA_JSON EGAMMA_PROBES INPUT OBSERVER");
     correction::PluginRegistry registry;
@@ -260,7 +262,8 @@ int main(int argc, char** argv) try {
     const auto table_probes = compare_tables(*set, argv[3]);
     const auto electron = set->at("electron_prepare");
     const auto photon = set->at("photon_prepare");
-    std::cout << "egamma_root_probe_rows=" << table_probes << '\n';
+    std::cout << "egamma_root_probe_rows=" << table_probes
+              << " egamma_composed_boundary_probes=" << egamma_boundaries(*set) << '\n';
 
     require(xAOD::Init("met_egamma_prepare_stock_check").isSuccess(), "xAOD init");
     std::unique_ptr<TFile> original(TFile::Open(argv[4], "READ"));
