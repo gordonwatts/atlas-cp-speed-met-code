@@ -1,0 +1,143 @@
+# MET inputs and working points from release test_configuration_Run3.yaml.
+# Keep only MET and the nominal object preparation consumed by the MET stage.
+CommonServices:
+  # The reference does not consume upstream efficiency weights.
+  enableExpertMode: true
+  runSystematics: true
+  filterSystematics: '^MET_.*$'
+  systematicsHistogram: systematicsList
+  separateWeightSystematics: true
+
+PileupReweighting: {}
+
+Jets:
+  - containerName: AnaJets
+    jetCollection: AntiKt4EMPFlowJets
+    recalibratePhyslite: false
+    runJvtUpdate: false
+    runNNJvtUpdate: true
+    runJvtSelection: false
+
+Electrons:
+  - containerName: AnaElectrons
+    recalibratePhyslite: false
+    minPt: 10000.0
+    WorkingPoint:
+      - selectionName: loose
+        identificationWP: LooseBLayerLH
+        isolationWP: Tight_VarRad
+        chargeIDSelectionRun2: true
+        noEffSF: true
+    PtEtaSelection:
+      minPt: 10000.0
+
+Photons:
+  - containerName: AnaPhotons
+    recomputeIsEM: false
+    recalibratePhyslite: false
+    WorkingPoint:
+      - selectionName: tight
+        qualityWP: Tight
+        isolationWP: FixedCutTight
+        recomputeIsEM: false
+        noEffSFForID: true
+        noEffSFForIso: true
+    PtEtaSelection:
+      minPt: 10000.0
+
+Muons:
+  - containerName: AnaMuons
+    recalibratePhyslite: false
+    WorkingPoint:
+      - selectionName: medium
+        quality: Medium
+        isolation: Loose_VarRad
+        noEffSF: true
+
+TauJets:
+  - containerName: AnaTauJets
+    rerunTruthMatching: false
+    WorkingPoint:
+      - selectionName: tight
+        quality: Tight
+        noEffSF: true
+
+MissingET:
+  - containerName: AnaMET
+    jets: AnaJets
+    electrons: AnaElectrons.loose
+    photons: AnaPhotons.tight
+    taus: AnaTauJets.tight
+    muons: AnaMuons.medium
+    metWP: Tight
+    useJVT: true
+    saveSignificance: true
+    addExtraSignificanceVars: true
+
+Output:
+  nonContainers: [EventInfo]
+  vars:
+    - EventInfo.eventNumber -> eventNumber
+    - EventInfo.runNumber -> runNumber
+    - EventInfo.mcChannelNumber -> mcChannelNumber
+    - EventInfo.averageInteractionsPerCrossing -> averageInteractionsPerCrossing
+    - EventInfo.actualInteractionsPerCrossing -> actualInteractionsPerCrossing
+    - AnaMET_%SYS%.mpx -> fullMet_mpx_%SYS% type=float
+    - AnaMET_%SYS%.mpy -> fullMet_mpy_%SYS% type=float
+    - AnaMET_%SYS%.source -> fullMet_source_%SYS% type=uint64
+    - AnaMET_%SYS%.name -> fullMet_term_%SYS%
+    - AnaMET_%SYS%.ConstitObjectLinks -> fullMet_constituentLinks_%SYS%
+    - AnaMET_%SYS%.ConstitObjectWeights -> fullMet_constituentWeights_%SYS% type=vector_float
+    - AnaJets_NOSYS.NNJvt -> jet_NNJvt type=float
+    - AnaJets_NOSYS.NNJvtPass -> jet_NNJvtPass type=char
+    - AnaJets_NOSYS.pt -> jet_pt type=float
+    - AnaJets_NOSYS.eta -> jet_eta type=float
+    - AnaJets_NOSYS.phi -> jet_phi type=float
+    - AnaJets_NOSYS.m -> jet_m type=float
+    - AnaJets_NOSYS.originalObjectLink -> jet_originalObjectLink
+    - AnaElectrons_NOSYS.pt -> ele_pt type=float
+    - AnaElectrons_NOSYS.eta -> ele_eta type=float
+    - AnaElectrons_NOSYS.phi -> ele_phi type=float
+    - AnaElectrons_NOSYS.m -> ele_m type=float
+    - AnaElectrons_NOSYS.selectEta -> ele_selectEta type=uint32
+    - AnaElectrons_NOSYS.goodOQ -> ele_goodOQ type=uint32
+    - AnaElectrons_NOSYS.selectPt -> ele_selectPt type=uint32
+    - AnaElectrons_NOSYS.trackSelection_loose -> ele_trackSelection_loose type=uint32
+    - AnaElectrons_NOSYS.selectLikelihood_loose -> ele_selectLikelihood_loose type=char
+    - AnaElectrons_NOSYS.isolated_loose -> ele_isolated_loose type=char
+    - AnaElectrons_NOSYS.selectPtEta -> ele_selectPtEta type=uint32
+    - AnaElectrons_NOSYS.originalObjectLink -> ele_originalObjectLink
+    - AnaPhotons_NOSYS.pt -> pho_pt type=float
+    - AnaPhotons_NOSYS.eta -> pho_eta type=float
+    - AnaPhotons_NOSYS.phi -> pho_phi type=float
+    - AnaPhotons_NOSYS.m -> pho_m type=float
+    - AnaPhotons_NOSYS.selectEta -> pho_selectEta type=uint32
+    - AnaPhotons_NOSYS.goodOQ -> pho_goodOQ type=uint32
+    - AnaPhotons_NOSYS.isClean -> pho_isClean type=uint32
+    - AnaPhotons_NOSYS.selectPt -> pho_selectPt type=uint32
+    - AnaPhotons_NOSYS.selectEM_tight -> pho_selectEM_tight type=char
+    - AnaPhotons_NOSYS.isolated_tight -> pho_isolated_tight type=char
+    - AnaPhotons_NOSYS.selectPtEta -> pho_selectPtEta type=uint32
+    - AnaPhotons_NOSYS.originalObjectLink -> pho_originalObjectLink
+    - AnaTauJets_NOSYS.pt -> tau_pt type=float
+    - AnaTauJets_NOSYS.eta -> tau_eta type=float
+    - AnaTauJets_NOSYS.phi -> tau_phi type=float
+    - AnaTauJets_NOSYS.m -> tau_m type=float
+    - AnaTauJets_NOSYS.selected_tau_tight -> tau_selected_tau_tight type=char
+    - AnaTauJets_NOSYS.originalObjectLink -> tau_originalObjectLink
+    - AnaMuons_NOSYS.pt -> mu_pt type=float
+    - AnaMuons_NOSYS.eta -> mu_eta type=float
+    - AnaMuons_NOSYS.phi -> mu_phi type=float
+    - AnaMuons_NOSYS.m -> mu_m type=float
+    - AnaMuons_NOSYS.selectEta -> mu_selectEta type=uint32
+    - AnaMuons_NOSYS.selectPt -> mu_selectPt type=uint32
+    - AnaMuons_NOSYS.trackSelection_medium -> mu_trackSelection_medium type=uint32
+    - AnaMuons_NOSYS.good_muon_medium -> mu_good_muon_medium type=char
+    - AnaMuons_NOSYS.isolated_muon_medium -> mu_isolated_muon_medium type=char
+    - AnaMuons_NOSYS.originalObjectLink -> mu_originalObjectLink
+  containers:
+    finalMet_: AnaMET
+  containersFullMET:
+    fullMet_: AnaMET
+
+PrintConfiguration: {}
