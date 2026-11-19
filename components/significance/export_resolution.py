@@ -55,13 +55,27 @@ def validate_config(config, algorithm):
         "ESModel": EGAMMA_MODEL, "ResolutionType": "SigmaEff90", "decorrelationModel": "1NP_v1",
         "useFastSim": 0, "useMVACalibration": 0,
     })
-    check_fields(children["METSigAutoConf_TauPerfTool"]["Properties"], {"WeightFileName": TAU_FILE})
-    jet = children["MetSigAutoConf_JetCalibTool_AntiKt4EMPFlow"]["Properties"]
-    check_fields(jet, {
-        "CalibArea": "00-04-81", "CalibSequence": "JetArea_Residual_EtaJES_GSC_Smear",
-        "ConfigDir": "JetCalibTools/CalibrationConfigs/", "ConfigFile": JET_CONFIG,
-        "DEVmode": 0, "IsData": 0, "JetCollection": "AntiKt4EMPFlow",
-    })
+    tau = children["METSigAutoConf_TauPerfTool"]["Properties"]
+    check_fields(tau, {"WeightFileName": TAU_FILE})
+    jet_name = "MetSigAutoConf_JetCalibTool_AntiKt4EMPFlow"
+    jet_properties = []
+    if jet_name in children:
+        jet_properties.append(children[jet_name]["Properties"])
+    # In AnalysisBase 25.2.117 standalone the full config writer can flatten
+    # this privately created tool into the adjacent tau property block.
+    if jet_name in tau:
+        prefix, _, name = str(tau[jet_name]).strip("'").partition("/")
+        if prefix not in ("18JetCalibrationTool", "JetCalibrationTool") or name != f"{props['Name']}.{jet_name}":
+            raise ValueError(f"Unexpected resolved jet tool marker {tau[jet_name]!r}")
+        jet_properties.append(tau)
+    if not jet_properties:
+        raise ValueError("Missing resolved JetCalibrationTool properties in the stock config")
+    for jet in jet_properties:
+        check_fields(jet, {
+            "CalibArea": "00-04-81", "CalibSequence": "JetArea_Residual_EtaJES_GSC_Smear",
+            "ConfigDir": "JetCalibTools/CalibrationConfigs/", "ConfigFile": JET_CONFIG,
+            "DEVmode": 0, "IsData": 0, "JetCollection": "AntiKt4EMPFlow",
+        })
     check_fields(children["MuonCalibTool"]["Properties"], {
         "calibMode": 0, "release": MUON_RELEASE, "systematicScheme": "Corr_Scale",
         "useRandomRunNumber": 0, "expertMode_RunNumber": 0, "expert_validationMode": 0,
