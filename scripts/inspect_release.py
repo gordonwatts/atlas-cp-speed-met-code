@@ -27,7 +27,7 @@ def inspect_link(link) -> dict:
 def inspect(
     input_file: Path,
     output_file: Path,
-    events: int = typer.Option(16, min=1, max=100),
+    events: int = typer.Option(16, min=1, max=20000),
 ) -> None:
     import ROOT
 

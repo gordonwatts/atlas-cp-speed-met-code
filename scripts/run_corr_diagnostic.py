@@ -10,7 +10,7 @@ app = typer.Typer(add_completion=False)
 
 
 @app.command()
-def run(input_file: Path, configuration: Path, events: int = typer.Option(16, min=1, max=100)) -> None:
+def run(input_file: Path, configuration: Path, events: int = typer.Option(16, min=1, max=20000)) -> None:
     from AnalysisAlgorithmsConfig.EventLoopCPRunScript import EventLoopCPRunScript
 
     class CorrelatedMETDiagnostic(EventLoopCPRunScript):

@@ -1,0 +1,68 @@
+CommonServices:
+  enableExpertMode: true
+  runSystematics: true
+  filterSystematics: ^MET_.*$
+  systematicsHistogram: systematicsList
+  separateWeightSystematics: true
+PileupReweighting: {}
+Jets:
+- containerName: AnaJets
+  jetCollection: AntiKt4EMPFlowJets
+  recalibratePhyslite: false
+  runJvtUpdate: false
+  runNNJvtUpdate: true
+  runJvtSelection: false
+Electrons:
+- containerName: AnaElectrons
+  recalibratePhyslite: false
+  minPt: 10000.0
+  WorkingPoint:
+  - selectionName: loose
+    identificationWP: LooseBLayerLH
+    isolationWP: Tight_VarRad
+    chargeIDSelectionRun2: true
+    noEffSF: true
+  PtEtaSelection:
+    minPt: 10000.0
+Photons:
+- containerName: AnaPhotons
+  recomputeIsEM: false
+  recalibratePhyslite: false
+  WorkingPoint:
+  - selectionName: tight
+    qualityWP: Tight
+    isolationWP: FixedCutTight
+    recomputeIsEM: false
+    noEffSFForID: true
+    noEffSFForIso: true
+  PtEtaSelection:
+    minPt: 10000.0
+Muons:
+- containerName: AnaMuons
+  recalibratePhyslite: false
+  WorkingPoint:
+  - selectionName: medium
+    quality: Medium
+    isolation: Loose_VarRad
+    noEffSF: true
+TauJets:
+- containerName: AnaTauJets
+  rerunTruthMatching: false
+  WorkingPoint:
+  - selectionName: tight
+    quality: Tight
+    noEffSF: true
+MissingET:
+- containerName: AnaMET
+  jets: AnaJets
+  electrons: AnaElectrons.loose
+  photons: AnaPhotons.tight
+  taus: AnaTauJets.tight
+  muons: AnaMuons.medium
+  metWP: Tight
+  useJVT: true
+  saveSignificance: true
+  addExtraSignificanceVars: true
+Output:
+  metVars:
+  - AnaMET_%SYS%.met -> finalMet_met_%SYS% type=float
