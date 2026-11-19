@@ -38,3 +38,31 @@ ldd "$out/build/libmet_preparation_provider.so" > "$out/provider.ldd"
 ```
 
 `MET_CORE_CONFIG` is the directory containing `correctionlibConfig.cmake` for the current pinned evaluator, built with the same compiler. The stock check runs separately through the release TauSmearingTool and TauSelectionTool on every original tau and compares all six cut results, Tight, TES compatibility, charged track count and binary32 p4. The stock check uses release-xAOD links as a component oracle. Standalone input decoding still needs its own comparison.
+
+## Muon nominal stage
+
+The installed calibration algorithm skips nominal muon calibration for this PHYSLITE recipe. Use the original pT, eta, phi and mass. The stored `InnerDetectorPt` and `MuonSpectrometerPt` enter the configured release Medium quality check.
+
+`muon_schema.json` lists the input types, order and output components. Evaluate `muon_selection_eta(raw_eta)` and preserve its uint32 gate. Evaluate `muon_selection_vertex(vertex_type)` in raw vertex order to choose the first PriVtx; use zero z when none exists. `muon_selection_track_roles` returns the primary and ID-summary role codes `[absent=0, ID=1, extrapolated MS=2, combined=3, MS-only extrapolated=4, MS=5]`. Use the available xAOD link targets, including the forward ID collection. Collect raw track and muon hit fields by those roles. An unavailable covariance vector has size -1 and an unavailable hit summary is -1. Slot 0 is d0 variance. Slot 4 is q/p variance. The three precision-layer summaries can fall back to the primary track when the muon accessor is absent.
+
+`muon_selection_after_calibration` returns `[pt_bits, track_bits, medium, bad_muon, isolation, selected]`. The track mask has low bits for track existence, d0 significance and projected z0. Unused bits are set. Skipped track is `0xfffffff8` and skipped pT is `0xfffffffe`. `track_iso` uses raw `ptvarcone30_Nonprompt_All_MaxWeightTTVA_pt1000` and `calo_iso` uses raw `topoetcone20`. Their availability is recorded as low bits 0 and 1. Compare the signed float decorations separately to float-rounded `0.15 * pt` and `0.30 * pt` with inclusive thresholds. Both have the empty suffix. `calo_score` is `CaloMuonScore`. The `lowpt_parameters_mask` bits indicate the availability of `momentumBalanceSignificance`, `scatteringCurvatureSignificance` and `scatteringNeighbourSignificance`. The prior Medium and track implementations are traced in `muon.cxx`. Stock isolation is `IsolationConditionFormula` and checks the two Loose_VarRad conditions in order.
+
+Use the same release environment and CMake setup as for taus with a new output directory. Compare all raw rows against the precomputed independent A observer using:
+
+```bash
+out="$PWD/results/muon-preparation-001"
+mkdir -- "$out"
+taskset -c 0 python components/preparation/export_muon.py \
+  --reference-config results/reference-observer-full-001/full_config.json \
+  --output-dir "$out/bundle" > "$out/export.log" 2>&1
+taskset -c 0 cmake -S components/preparation -B "$out/build" \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_STANDARD_REQUIRED=ON \
+  -Dcorrectionlib_DIR="$MET_CORE_CONFIG" -DMET_PREPARATION_STOCK_CHECK=ON > "$out/configure.log" 2>&1
+taskset -c 0 cmake --build "$out/build" --parallel 1 > "$out/build.log" 2>&1
+read -r input < config/input.txt
+taskset -c 0 "$out/build/met_muon_prepare_stock_check" \
+  "$out/build/libmet_preparation_provider.so" "$out/bundle/muon.json" "$input" \
+  results/reference-observer-full-001/reference.root > "$out/stock.log" 2>&1
+```
+
+The witness reads only the original file for provider inputs. It compares binary32 p4, raw eta/pT/track masks, Medium, Loose_VarRad and final decisions against A. It independently probes signed isolation, equality thresholds and unavailable fields. The observer did not expose the unused bad-muon diagnostic.

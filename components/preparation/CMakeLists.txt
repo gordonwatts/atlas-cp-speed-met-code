@@ -12,7 +12,7 @@ if(NOT TARGET met_significance_numeric)
     add_subdirectory(../significance "${CMAKE_CURRENT_BINARY_DIR}/significance" EXCLUDE_FROM_ALL)
 endif()
 
-add_library(met_preparation_nodes STATIC preparation.cxx tau.cxx)
+add_library(met_preparation_nodes STATIC preparation.cxx tau.cxx muon.cxx)
 add_library(atlas::met_preparation ALIAS met_preparation_nodes)
 target_link_libraries(met_preparation_nodes PUBLIC correctionlib PRIVATE met_significance_numeric)
 target_include_directories(met_preparation_nodes PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -36,4 +36,11 @@ if(MET_PREPARATION_STOCK_CHECK)
     target_compile_definitions(met_tau_prepare_stock_check PRIVATE XAOD_STANDALONE XAOD_ANALYSIS)
     target_link_libraries(met_tau_prepare_stock_check PRIVATE correctionlib
         AnalysisBase::ColumnarModeLib AnalysisBase::xAODRootAccess AnalysisBase::TauAnalysisToolsLib)
+
+    add_executable(met_muon_prepare_stock_check muon_stock.cxx)
+    target_compile_features(met_muon_prepare_stock_check PRIVATE cxx_std_23)
+    target_compile_definitions(met_muon_prepare_stock_check PRIVATE XAOD_STANDALONE XAOD_ANALYSIS)
+    target_link_libraries(met_muon_prepare_stock_check PRIVATE correctionlib
+        AnalysisBase::xAODRootAccess AnalysisBase::xAODMuon AnalysisBase::xAODEventInfo
+        AnalysisBase::xAODTracking ROOT::TreePlayer)
 endif()
