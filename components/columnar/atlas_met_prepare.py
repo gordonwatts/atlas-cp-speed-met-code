@@ -103,6 +103,27 @@ class Link:
         self.index = dense(array[index], "u4", 0xffffffff)
 
 
+# The selected EM layers use slots 1 through 7. Rank counts lower set bits.
+SAMPLING_RANK = np.asarray([mask.bit_count() for mask in range(1 << 7)], dtype="i8")
+
+
+def pack_sampling_column(source):
+    layout = ak.to_layout(source)
+    if not isinstance(layout, (ak.contents.ListOffsetArray, ak.contents.ListArray)):
+        return None
+    if not isinstance(layout.content, ak.contents.NumpyArray):
+        return None
+    values = layout.content.data
+    if not isinstance(values, np.ndarray) or values.ndim != 1 or values.dtype.kind != "f":
+        return None
+    starts = np.asarray(layout.starts, dtype="i8")
+    stops = np.asarray(layout.stops, dtype="i8")
+    counts = stops - starts
+    if np.any((counts < 0) | ((counts > 0) & ((starts < 0) | (stops > len(values))))):
+        return None
+    return starts, counts, values
+
+
 class Resolved:
     def __init__(self, data, link, event_rows, candidates):
         self.data = data
@@ -169,25 +190,44 @@ class Resolved:
         return keys, indices
 
     def sampling(self, field, sampling_pattern, slot):
-        # The packed array stores one value per set sampling bit, in enum order.
         output = np.zeros(self.size, dtype="f4")
         for target, local, rows in self.locations:
-            source = ak.flatten(self.data.raw[target+"AuxDyn."+field], axis=1)[rows]
+            source, packed = self.data.sampling_column(target+"AuxDyn."+field)
+            if packed is not None:
+                starts, counts, content = packed
+                try:
+                    row_starts = starts[rows]
+                    row_counts = counts[rows]
+                except IndexError:
+                    # Ask Awkward to report the original invalid row selection.
+                    packed = None
+            if packed is None:
+                gathered = source[rows]
+
             relevant = (sampling_pattern[local] & (1<<slot)) != 0
             if not relevant.any():
                 continue
             chosen = local[relevant]
             masks = sampling_pattern[chosen] & ((1<<slot)-1)
-            rank = np.zeros(len(chosen), dtype="i8")
-            for bit in range(slot):
-                rank += (masks>>bit)&1
-            selected = source[relevant]
-            count = dense(ak.num(selected, axis=1), "i8")
-            start = np.concatenate(([0], np.cumsum(count, dtype="i8")))
+            if slot <= 7:
+                rank = SAMPLING_RANK[masks]
+            else:
+                rank = np.zeros(len(chosen), dtype="i8")
+                for bit in range(slot):
+                    rank += (masks>>bit)&1
+
+            if packed is None:
+                selected = gathered[relevant]
+                count = dense(ak.num(selected, axis=1), "i8")
+                start = np.concatenate(([0], np.cumsum(count, dtype="i8")))[:-1]
+                content = dense(ak.flatten(selected, axis=1), "f4")
+            else:
+                count = row_counts[relevant]
+                start = row_starts[relevant]
+
             good = rank < count
             output[chosen] = -999
-            content = dense(ak.flatten(selected, axis=1), "f4")
-            output[chosen[good]] = content[start[:-1][good]+rank[good]]
+            output[chosen[good]] = content[start[good]+rank[good]]
         return output
 
 
@@ -206,6 +246,7 @@ class Data:
         self.output, self.keys, self.evaluate = output, keys, evaluate
         self.capture_preparation = capture_preparation
         self.counts = {}
+        self.sampling_columns = {}
         self.validated_empty_columns = set()
         self.events = {owner: roles_for_events(output[short+".o"]) for short,owner in OWNERS.items()}
 
@@ -213,6 +254,12 @@ class Data:
         if anchor not in self.counts:
             self.counts[anchor] = flat(self.raw[anchor], 1, "f4")[0][0]
         return self.counts[anchor]
+
+    def sampling_column(self, name):
+        if name not in self.sampling_columns:
+            source = ak.flatten(self.raw[name], axis=1)
+            self.sampling_columns[name] = source, pack_sampling_column(source)
+        return self.sampling_columns[name]
 
     def own(self, owner, field, dtype="f4", default=None):
         n = len(self.events[owner])
