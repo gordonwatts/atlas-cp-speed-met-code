@@ -104,3 +104,90 @@ hist="$PWD/results/reference-histogram-transport-001/histogram.npz"
 The comparator records first failures and counts for original entry/run/event/DSID, term ordering, numerical tolerances and nonfinite classes, nominal p4 and exact gate bits per original object, ordered constituent links/weights, exact association writes and JVT decisions, tool success, soft seed and first Gaussian, per-event bin assignments, and saved histogram arrays. Stock shallow owner keys and C current keys are recorded together with their original owner. Retain both trace files independently. When supplied, the stock `IParticle` getter trace checks the real double `pt`, `eta`, `phi`, mass and energy, including bit patterns and selected rows. These checks use separate release getter values from the stored auxiliary p4 and selection gate readback. A signed seed plus Linux unsigned setter and uint32 effective seed witness the wrapping and zero fallback. Corr uses the independently collected two-state stock observer and its two-state status file. An optional runtime record lists actual original leaves loaded and missing, payload hashes, dependency versions and live mapped shared objects. The bundle manifest records both the patched parser file and patch hashes alongside the upstream pin and binary hashes.
 
 Remove diagnostics from timed commands. For the nominal-only path use the independent stock nominal observer/histogram. The prepared p4 and selection gates are state-independent in this frozen recipe. The v2 prepared momentum node takes the native particle kind. Re-export `preparation.json` with `combine_preparation.py` when adopting it. `check_prepared_getter.py <runtime-directory>` exercises the shared registered node for massless photons, signed negative mass, the zero-pt eta encoding and exact fixed muon mass. The paired stock getter receipt also checks the actual energy passed to significance for every ordered egamma constituent.
+
+
+### M02 maker-reuse trial
+
+M02 has the same standalone command and payloads as the faithful checkpoint
+`6b19c477e8d5578bb2c8c3a5e0eccc11e3437759`. Archive the trial commit into
+a fresh source/build/runtime directory with `scripts/build_columnar_full.sh`.
+Keep `results/columnar-portable-002` and the faithful numerical and timing receipts.
+The trial evaluates the registered maker once per event and starts each soft
+correction and Final build from a fresh mutable copy of the maker terms.
+Significance runs in the original event/state order. The result and traces stay
+local to the event. The first state reports a maker failure before any result
+can be reused.
+
+In the candidate TSV, `makerInvocation` records an actual native call.
+Ordered association writes, JVT and rebuild rows appear only with this call.
+`makerReuse` gives the original ordinal and success for each later state.
+Contributor rows and downstream work are observed directly for every state.
+`compare.py --maker-reuse` validates invocation and reuse coverage, checks the
+nominal producer records, and compares their logical use to independent stock
+rows in every state. The report separates actual writes from logical reuses.
+Expect 20,000 actual invocations and 80,000 reused results with five states.
+The two-state diagnostic expects 20,000 actual invocations and 20,000 reuses.
+
+In the campaign WSL checkout, set `pin` to the trial commit. Use the same
+`python314` and `uv` executables as the faithful receipts.
+
+```bash
+repo=$PWD
+snapshot="$repo/results/columnar-m02-build-001"
+evidence="$repo/results/columnar-m02-acceptance-001"
+trial_portable="$repo/results/columnar-m02-portable-001"
+faithful_portable="$repo/results/columnar-portable-002"
+bash scripts/build_columnar_full.sh "$snapshot" "$pin"
+source="$snapshot/source/components/columnar"
+runtime="$snapshot/runtime"
+input=$(cat config/input.txt)
+clean=(env -i "HOME=$HOME" PATH=/usr/bin:/bin LANG=C.UTF-8 "LD_LIBRARY_PATH=$runtime/native"
+       OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+       VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1 RAYON_NUM_THREADS=1)
+mkdir "$evidence" "$evidence/smoke"
+audit() {
+    local dest=$1 stock=$2 histogram=$3 status=$4 entries=$5
+    shift 5
+    "${clean[@]}" taskset -c 0 "$python314" "$source/met_demo.py" "$input" "$dest/c.npz" \
+        --runtime "$runtime" --stop "$entries" --observables "$dest/c-observables.npz" \
+        --trace "$dest/c-status.tsv" --runtime-record "$dest/c-runtime.json" "$@"
+    "${clean[@]}" "PYTHONPATH=$repo/scripts" taskset -c 0 "$python314" "$source/compare.py" \
+        "$stock" "$histogram" "$dest/c-observables.npz" "$dest/c.npz" "$dest/compare.json" \
+        --stock-trace "$status" --candidate-trace "$dest/c-status.tsv" \
+        --stock-getters "$repo/results/reference-prepared-full-001/prepared-p4.tsv" \
+        --expected-events "$entries" --maker-reuse
+    cmp "$dest/c.npz" "$histogram"
+}
+stock_full="$repo/results/reference-observer-full-001"
+hist_full="$repo/results/reference-production-full-002/histogram.npz"
+hist_nominal="$repo/results/reference-production-nominal-002/histogram.npz"
+status_full="$repo/results/reference-status-full-001/status.tsv"
+audit "$evidence/smoke" "$stock_full" "$repo/results/columnar-full-ledger-smoke-001/stock.npz" \
+    "$status_full" 16 --chunk-size 7
+mkdir "$evidence/full" "$evidence/nominal" "$evidence/corr"
+audit "$evidence/full" "$stock_full" "$hist_full" "$status_full" 20000
+audit "$evidence/corr" "$repo/results/reference-observer-corr-001" \
+    "$repo/results/columnar-full-ledger-acceptance-002/corr/stock.npz" \
+    "$repo/results/reference-status-corr-001/status.tsv" 20000 --correlated-diagnostic
+"${clean[@]}" taskset -c 0 "$python314" "$source/met_demo.py" "$input" "$evidence/nominal/c.npz" \
+    --runtime "$runtime" --stop 20000 --nominal-only --observables "$evidence/nominal/c-observables.npz"
+"${clean[@]}" "PYTHONPATH=$repo/scripts" taskset -c 0 "$python314" "$source/compare.py" \
+    "$repo/results/reference-observer-nominal-001" "$hist_nominal" "$evidence/nominal/c-observables.npz" \
+    "$evidence/nominal/c.npz" "$evidence/nominal/compare.json" --expected-events 20000
+for scope in full nominal corr; do
+    cmp "$evidence/$scope/c-observables.npz" \
+        "$repo/results/columnar-full-ledger-acceptance-002/$scope/c-observables.npz"
+done
+bash scripts/run_columnar_portability.sh "$trial_portable" "$snapshot" "$python314" "$uv"
+PYTHONPATH="$repo/scripts" "$python314" "$source/benchmark_maker_reuse.py" \
+    "$input" "$faithful_portable" "$trial_portable" "$hist_full" "$hist_nominal" \
+    "$repo/results/columnar-m02-timing-001"
+```
+
+Run timing in an exclusive bracket. The harness uses the faithful worker
+controls, native identity and histogram checks. It alternates order within the
+pairs and discards the first round. Each variant has its own wheel, dependency
+cache, environment and runtime receipts. The summary gives all retained times,
+mean, spread, qualification and paired elapsed differences for both workloads.
+The faithful package remains the fallback if an acceptance check fails or
+the measured change is inconclusive.

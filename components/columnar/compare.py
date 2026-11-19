@@ -22,6 +22,7 @@ ROLES = dict(zip(COLLECTIONS, ("jet", "electron", "photon", "muon", "tau"), stri
 EXACT = {"associationFlag", "jetJvt", "rebuildMET", "rebuildJetMET", "makerAlg",
          "builderAlg", "significanceAlg", "setRandomSeed", "applySystematicVariation"}
 NORMALIZED = EXACT | {"gaussian", "applyCorrection", "varianceMET"}
+MAKER_ACTIONS = {"associationFlag", "jetJvt", "rebuildMET", "rebuildJetMET"}
 
 
 def summarize(test):
@@ -83,7 +84,7 @@ def getter_rows(path, entries):
             yield entry, [[reverse_roles[role],*fields] for _,role,*fields in group]
 
 
-def trace_match(stock, config, entries, states, stock_file, given_file, stock_getters):
+def trace_match(stock, config, entries, states, stock_file, given_file, stock_getters, maker_reuse):
     prepared, raw_key = prepared_fields(stock,config,entries)
     # Stock's key is its shallow-container hash. C's current object key is the
     # original owner with bit 31 set. The event-local index and original owner
@@ -100,6 +101,9 @@ def trace_match(stock, config, entries, states, stock_file, given_file, stock_ge
     examples = {}
     worst_p4_delta = {}
     accessor_mass = {"electron":0.510998910,"muon":105.658367}
+    maker_dispatch = Counter()
+    actual_maker_rows = Counter()
+    reused_maker_rows = Counter()
     getter_stream = getter_rows(stock_getters,entries) if stock_getters is not None else None
 
     def check(kind, entry, equal, reference=None, actual=None):
@@ -120,6 +124,27 @@ def trace_match(stock, config, entries, states, stock_file, given_file, stock_ge
             if reference is None or observed is None or reference[0] != entry or observed[0] != entry:
                 raise ValueError(f"Missing or reordered trace event {entry}")
             a, b = (normalize(row[1]) for row in (reference,observed))
+            if maker_reuse:
+                calls = [(state,values) for state,action,values in observed[1] if action=="makerInvocation"]
+                reuses = [(state,values) for state,action,values in observed[1] if action=="makerReuse"]
+                expected_calls = [(0,["1"])]
+                expected_reuses = [(state,["0","1"]) for state in range(1,len(states))]
+                maker_dispatch["actual_invocations"] += len(calls)
+                maker_dispatch["reused_state_results"] += len(reuses)
+                check("makerInvocation",entry,calls == expected_calls,expected_calls,calls)
+                check("makerReuse",entry,reuses == expected_reuses,expected_reuses,reuses)
+                actor_states = [state for state,action,_ in observed[1] if action=="associationActor"]
+                check("makerActorWriteOrigin",entry,all(state==0 for state in actor_states),0,actor_states)
+                for action in MAKER_ACTIONS:
+                    actual = b.get(action,[])
+                    nominal = [values for state,values in actual if state==0]
+                    check(action+"_producer_only",entry,len(nominal)==len(actual),len(nominal),len(actual))
+                    actual_maker_rows[action] += len(actual)
+                    # Replay is only used for the comparison, with recorded source-state provenance.
+                    logical = [(state,values) for state,binding in reuses
+                               if binding==["0","1"] for values in nominal]
+                    reused_maker_rows[action] += len(logical)
+                    b[action] = actual + logical
             for action in EXACT:
                 lhs, rhs = (rows.get(action,[]) for rows in (a,b))
                 check(action+"_length",entry,len(lhs) == len(rhs),len(lhs),len(rhs))
@@ -251,6 +276,8 @@ def trace_match(stock, config, entries, states, stock_file, given_file, stock_ge
                             exact = struct.pack("=d",float.fromhex(want_value)) == struct.pack("=d",float.fromhex(got_value))
                             check(f"significance_egamma_production_{name}",entry,exact,want_value,got_value)
     return {"compared":compared,"failures":failures,"first_failures":examples,
+            "maker_dispatch":dict(maker_dispatch),"actual_maker_rows":dict(actual_maker_rows),
+            "logical_reused_maker_rows":dict(reused_maker_rows),
             "stock_getters":str(stock_getters) if stock_getters is not None else None,
             "worst_p4_delta":worst_p4_delta,
             "owner_map":{role: {"original":key,"stock_shallow":stock_key.get(role),"columnar_current":key | 2**31}
@@ -260,6 +287,7 @@ def trace_match(stock, config, entries, states, stock_file, given_file, stock_ge
 def main(stock_dir: Path, stock_histogram: Path, candidate_observables: Path, candidate_histogram: Path,
          output: Path, stock_trace: Path | None = None, candidate_trace: Path | None = None,
          stock_getters: Path | None = None,
+         maker_reuse: bool = False,
          expected_events: int | None = typer.Option(None,min=1)):
     with root_file(stock_dir/"hist-reference.root") as file:
         states = file["systematicsList"].axis().labels()
@@ -299,9 +327,11 @@ def main(stock_dir: Path, stock_histogram: Path, candidate_observables: Path, ca
             raise ValueError("Unexpected histogram fields")
         if bool(stock_trace) != bool(candidate_trace) or (stock_getters is not None and stock_trace is None):
             raise ValueError("Provide independent stock and candidate status traces, optionally with the stock getter trace")
+        if maker_reuse and stock_trace is None:
+            raise ValueError("Maker reuse verification requires both stock and candidate traces")
         if stock_trace is not None:
             config = json.loads((stock_dir/"full_config.json").read_text())
-            report["trace"] = trace_match(stock,config,entries,states,stock_trace,candidate_trace,stock_getters)
+            report["trace"] = trace_match(stock,config,entries,states,stock_trace,candidate_trace,stock_getters,maker_reuse)
     report["passed"] = (not any(row["total_failures"] for row in report["numerical"].values())
                         and not any(row["count"] for row in (*report["exact"].values(),*report["event_bins"].values()))
                         and all(report["histogram"].values())
