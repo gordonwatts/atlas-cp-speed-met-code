@@ -92,9 +92,12 @@ def summarize(trials: list[dict]) -> dict:
                 for leg, observations in (
                     ("framework_seconds", ("framework_valid",)),
                     ("histogram_seconds", ("histogram_valid",)),
-                    ("total_seconds", ("framework_valid", "histogram_valid") if path != "C" else ("direct_valid",)),
+                    ("total_seconds", ("direct_valid",) if "direct" in rows[0] else ("framework_valid", "histogram_valid")),
                 ) if leg in rows[0]
             }
+            if "direct" in rows[0]:
+                rss = [trial["direct"]["peak_rss_kib"] for trial in rows[1:]]
+                scope_report[path]["total_seconds"]["peak_rss_kib"] = {"retained": rss, "maximum": max(rss)}
         if "B" in scope_report:
             left, right = (scope_report[x]["framework_seconds"] for x in ("A", "B"))
             ratio = right["mean"] / left["mean"] if left["qualified"] and right["qualified"] else None
@@ -104,14 +107,37 @@ def summarize(trials: list[dict]) -> dict:
             left, right = (scope_report[x]["total_seconds"] for x in ("A", "C"))
             ratio = left["mean"] / right["mean"] if left["qualified"] and right["qualified"] else None
             scope_report["endpoint_ratio_A_over_C"] = ratio
+        if "C-faithful" in scope_report:
+            baseline, delivered = (scope_report[x]["total_seconds"] for x in ("C-faithful", "C"))
+            cumulative = None
+            if baseline["qualified"] and delivered["qualified"]:
+                paired = [before - after for before, after in zip(
+                    baseline["retained_seconds"], delivered["retained_seconds"], strict=True
+                )]
+                cumulative = {"paired_seconds": paired, "mean_seconds_saved": statistics.mean(paired),
+                              "sample_sd_seconds": statistics.stdev(paired),
+                              "fraction_saved": statistics.mean(paired) / baseline["mean"]}
+            scope_report["cumulative_columnar_improvement"] = cumulative
         summary[scope] = scope_report
     return summary
+
+
+def portable_entry(portable: Path) -> tuple[Path, Path, set[str], dict]:
+    python = portable / "pip-env" / "bin" / "python"
+    bundle = portable / "bundle"
+    demo = bundle / "met_demo.py"
+    native = portable / "pip-env" / "lib" / "python3.14" / "site-packages" / "atlas_met_portable" / "native"
+    expected = {str((native / name).resolve(strict=True)) for name in NATIVE_C}
+    files = [python, demo, bundle / "bundle.json", portable / "pip-freeze.txt",
+             portable / "installed-identities.json", *sorted((bundle / "wheels").glob("*.whl"))]
+    return python, demo, expected, {path.name: receipt(path) for path in files}
 
 
 @app.command()
 def benchmark(
     input_file: Path, frozen_build: Path, portable: Path, output: Path, histogram_python: Path,
     label: str = "initial-matched", framework_budget_only: bool = False,
+    faithful_control: Path | None = None,
 ) -> None:
     repo = Path(__file__).resolve().parents[1]
     # Keep the user-facing .root alias. CPRun rejects its .art symlink target.
@@ -131,16 +157,16 @@ def benchmark(
     maker = repo / "results" / "maker-component-001" / "maker.json"
     soft = repo / "results" / "soft-component-exact-001" / "bundle" / "corrections.json"
     significance = repo / "results" / "significance-event-payload-001" / "met_significance_event.json"
-    portable_python = portable / "pip-env" / "bin" / "python"
-    demo = portable / "bundle" / "met_demo.py"
-    native = portable / "pip-env" / "lib" / "python3.14" / "site-packages" / "atlas_met_portable" / "native"
-    expected_native = {str((native / name).resolve(strict=True)) for name in NATIVE_C}
+    columnar = {"C": portable_entry(portable)}
+    if faithful_control is not None:
+        if framework_budget_only or faithful_control.resolve() == portable.resolve():
+            raise ValueError("Add a distinct faithful control to the complete cohort.")
+        columnar["C-faithful"] = portable_entry(faithful_control)
     expected_hashes = {scope: receipt(repo / "results" / f"reference-production-{scope}-002" / "histogram.npz")
                        for scope in SCOPES}
-    files = [production, stored_config, stock, boot, bridge, provider, core, maker, soft, significance,
-             demo, portable / "bundle" / "bundle.json", portable / "pip-freeze.txt",
-             portable / "installed-identities.json", *sorted((portable / "bundle" / "wheels").glob("*.whl"))]
+    files = [production, stored_config, stock, boot, bridge, provider, core, maker, soft, significance]
     identities = {path.name: receipt(path) for path in files}
+    identities.update({name: entry[3] for name, entry in columnar.items()})
     env_a = {key: value for key, value in os.environ.items() if not key.startswith("ATLAS_MET_")}
     env_a.update(dict.fromkeys(THREADS, "1"))
     env_b = {
@@ -162,7 +188,7 @@ def benchmark(
     for round_index in range(4):
         rotated_scopes = scopes[round_index % len(scopes):] + scopes[:round_index % len(scopes)]
         for scope in rotated_scopes:
-            paths = ("A", "B", "C")
+            paths = ("A", "B", *columnar)
             if scope == "stored":
                 paths = ("A", "C")
             if framework_budget_only:
@@ -173,7 +199,8 @@ def benchmark(
                 cwd.mkdir()
                 histogram_output = cwd / "histogram.npz"
                 trial = {"round": round_index, "scope": scope, "path": path}
-                if path == "C":
+                if path in columnar:
+                    portable_python, demo, expected_native, _ = columnar[path]
                     args = [str(portable_python), str(demo), str(input_file), str(histogram_output), "--stop", "20000"]
                     if scope == "nominal":
                         args.append("--nominal-only")
