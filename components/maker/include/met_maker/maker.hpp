@@ -143,6 +143,7 @@ struct EventInput {
     std::span<const std::uint8_t> vertex_types;
     bool association_map_available{true};
     bool core_container_available{true};
+    bool capture_flag_writes{};
 };
 
 struct NnjvtCutMap {
@@ -255,6 +256,14 @@ struct JetDecision {
     bool rejected{};
 };
 
+struct FlagWrite {
+    std::size_t association;
+    std::size_t slot;
+    bool selected;
+    ObjectId original;
+    TermType term;
+};
+
 struct Result {
     Status status{Status::success};
     std::vector<Term> terms;
@@ -262,6 +271,7 @@ struct Result {
     bool constituent_links_available{};
     bool constituent_weights_available{};
     std::vector<Mask> flags;
+    std::vector<FlagWrite> flag_writes;
     std::vector<JetDecision> jet_decisions;
     std::vector<Diagnostic> diagnostics;
 };

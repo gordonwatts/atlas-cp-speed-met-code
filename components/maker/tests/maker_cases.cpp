@@ -139,6 +139,16 @@ void overlap_and_identity()
     expect(term(result, TermType::photon).contributors.empty(),
            "PFlow edge vetoes the later photon across matching associations");
     expect(saw(result, Issue::missing_electron_association), "missing electron diagnostic");
+    expect(result.flag_writes.empty(), "production has no per-write trace");
+    input.capture_flag_writes = true;
+    const Result traced = evaluate(config, input);
+    expect(traced.flag_writes.size() == 2 && traced.flag_writes[0].association == 0
+           && traced.flag_writes[0].slot == 1 && traced.flag_writes[0].original == e.id
+           && traced.flag_writes[0].term == TermType::electron && traced.flag_writes[0].selected
+           && traced.flag_writes[1].association == 1 && traced.flag_writes[1].slot == 0,
+           "optional trace preserves actor identity and release association write order");
+    expect(traced.flags == result.flags, "optional write trace preserves final flags");
+    input.capture_flag_writes = false;
     const auto& soft = term(result, TermType::soft_track);
     expect(soft.momentum.mpx == -5.F && soft.momentum.mpy == 3.F && soft.momentum.sumet == 18.F,
            "only the unflagged miscellaneous key supplements the core");

@@ -381,6 +381,9 @@ private:
         if (!has_overlap) {
             for (const auto& [i, slot] : memberships) {
                 result_.flags[i] |= stock_signed_mask(slot);
+                if (event_.capture_flag_writes) {
+                    result_.flag_writes.push_back({i, slot, true, orig.id, term.type});
+                }
             }
         } else if (!is_muon_term) {
             return;
