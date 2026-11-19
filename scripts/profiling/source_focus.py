@@ -60,7 +60,7 @@ class Probe:
         return self.scope[-1] if self.scope else "outside_object_preparation"
 
     @contextmanager
-    def candidate(self, projection, method, field, target, rows):
+    def candidate(self, projection, method, field, target, rows, slot=None, lengths=False):
         name = target + "AuxDyn." + field
         available = name in projection.data.raw
         kind = "absent_field" if not available else "nonempty_rows" if len(rows) else "empty_rows"
@@ -70,11 +70,22 @@ class Probe:
         if available:
             self.raw_array_uses[(scope, method, name, kind)] += 1
         category = f"{scope}/{method}/{kind}"
+        eligible_group = None
+        if available and method == "column" and slot is None and not lengths:
+            layout = ak.to_layout(projection.data.raw[name])
+            if isinstance(layout, ak.contents.ListOffsetArray) and isinstance(layout.content, ak.contents.NumpyArray):
+                payload = layout.content.data
+                if payload.ndim == 1 and payload.dtype.kind in "biuf":
+                    eligible_group = f"{scope}/{kind}/{payload.dtype.str}"
         self.candidate_scope.append(category)
         try:
             with self.observe("candidate_group", category, len(rows)):
                 with self.observe("candidate_detail", f"{category}/{name}", len(rows)):
-                    yield
+                    if eligible_group is None:
+                        yield
+                    else:
+                        with self.observe("typed_scalar_candidate", eligible_group, len(rows)):
+                            yield
         finally:
             self.candidate_scope.pop()
 
@@ -86,7 +97,8 @@ def targeted_method(method, probe):
     loop, = (row for row in function.body if isinstance(row, ast.For))
     if ast.unparse(loop.iter) != "self.locations" or ast.unparse(loop.target) != "(target, local, rows)":
         raise ValueError(f"Unexpected accepted candidate loop in Resolved.{method}")
-    marker = ast.parse(f'with _candidate_probe(self, "{method}", field, target, rows): pass').body[0]
+    extra = ", slot, lengths" if method == "column" else ""
+    marker = ast.parse(f'with _candidate_probe(self, "{method}", field, target, rows{extra}): pass').body[0]
     marker.body = loop.body
     loop.body = [marker]
     ast.fix_missing_locations(tree)
