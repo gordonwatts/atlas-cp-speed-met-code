@@ -106,7 +106,7 @@ def main(
     runtime: Path | None = None,
     repeat: int = typer.Option(1, "-n", "--repeat", min=1),
     stop: int | None = typer.Option(None, min=0),
-    chunk_size: int = typer.Option(2000, min=1),
+    chunk_size: int = typer.Option(5000, min=1),
     nominal_only: bool = False,
     correlated_diagnostic: bool = False,
     trace: Path | None = None,
