@@ -633,6 +633,30 @@ EventObjects prepare_views(const Columns& cols, std::span<const ObjectRows> owne
     return packed;
 }
 
+void trace_prepared_rows(std::ostream& output,const Columns& cols,
+    std::span<const ObjectRows> owners,std::uint64_t entry,std::size_t event)
+{
+    constexpr std::array<std::size_t,5> gate_count{0,7,7,1,5};
+    for (std::size_t i=0; i<owners.size(); ++i) {
+        const auto& owner=owners[i];
+        const auto start=owner.events.start(event);
+        const std::string stem=stems[i];
+        const auto selected=i ? cols.get<std::uint8_t>(stem+".selected") : std::span<const std::uint8_t>{};
+        const auto p4=i ? P4(cols,stem+".prep.") : owner.p4;
+        const auto gates=i ? cols.get<std::uint32_t>(stem+".gate") : std::span<const std::uint32_t>{};
+        for (auto row=start; row<owner.events.end(event); ++row) {
+            const auto q=p4.row(row);
+            output << entry << "\t0\tprepared\t" << stem << '\t' << owner.key << '\t'
+                << row-start << '\t' << (i ? at(selected,row)!=0 : true) << '\t'
+                << q.pt << '\t' << q.eta << '\t' << q.phi << '\t' << q.mass;
+            for (std::size_t column=0; column<gate_count.at(i); ++column) {
+                output << '\t' << at(gates,gate_count[i]*row+column);
+            }
+            output << '\n';
+        }
+    }
+}
+
 void trace_maker_rows(std::ostream& output,std::uint64_t entry,std::size_t state,
     const m::EventInput& input,const m::Result& result)
 {
@@ -655,8 +679,8 @@ void trace_maker_rows(std::ostream& output,std::uint64_t entry,std::size_t state
     prefix("rebuildJetMET") << "RefJet\tPVSoftTrk\t" << input.jets.size() << "\t1\t1\n";
     for (const auto& term:result.terms) {
         for (const auto& c:term.contributors) {
-            prefix("contributor") << term.name << '\t' << (c.current.owner.value&0x7fffffffU)
-                << '\t' << c.current.index << '\t';
+            prefix("contributor") << term.name << '\t' << c.current.owner.value << '\t'
+                << (c.current.owner.value&0x7fffffffU) << '\t' << c.current.index << '\t';
             if (c.weight) output << *c.weight;
             output << '\n';
         }
@@ -727,11 +751,12 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
         if (trace_path) {
             trace.open(trace_path,std::ios::app);
             if (!trace) throw std::runtime_error("Cannot append C trace");
-            trace.precision(std::numeric_limits<float>::max_digits10);
+            trace.precision(std::numeric_limits<double>::max_digits10);
         }
         std::vector<float> scores(objects.front().events.length());
         for (std::size_t event=0; event<events; ++event) {
             const auto view=prepare_views(cols,objects,event,jet_input,*bundle,scores);
+            if (trace_path) trace_prepared_rows(trace,cols,objects,first_entry+event,event);
             const auto core_rows=core.event(event);
             const auto truth_rows=truth.event(event);
             std::vector<sf::Term> truth_terms;
@@ -796,11 +821,29 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
                 const std::array values{d.significance,d.directional,d.met_over_sqrt_sumet,d.met_over_sqrt_ht};
                 std::copy(values.begin(),values.end(),significance_out+4*stride);
                 if (trace_path) {
-                    trace << first_entry+event << '\t' << state << "\tsoftStatus\t1\t"
-                          << corrected.seed.truncated << '\t' << corrected.seed.effective << '\t'
-                          << corrected.drew << '\n';
-                    trace << first_entry+event << '\t' << state << "\tfinalStatus\t1\n";
-                    trace << first_entry+event << '\t' << state << "\tsignificanceStatus\t1\n";
+                    const auto prefix=[&](std::string_view action) -> std::ostream& {
+                        return trace << first_entry+event << '\t' << state << '\t' << action << '\t';
+                    };
+                    prefix("applySystematicVariation") << (std::string_view(states[state])=="NOSYS" ? "" : states[state]) << "\t1\n";
+                    prefix("setRandomSeed") << corrected.seed.setter_argument << '\n';
+                    prefix("seed") << corrected.seed.truncated << '\t' << corrected.seed.effective << '\t'
+                                  << (corrected.drew ? "called" : "skipped") << '\n';
+                    if (corrected.drew) {
+                        prefix("gaussian") << std::hexfloat << 0. << '\t' << 1. << '\t'
+                            << corrected.gaussian << std::defaultfloat << '\n';
+                    }
+                    const auto before=maker.terms.at(*corrected.term_index).momentum;
+                    const auto after=corrected.momentum;
+                    prefix("applyCorrection") << "2\t" << std::hexfloat << before.mpx << '\t'
+                        << before.mpy << '\t' << before.sumet << '\t' << after.mpx << '\t'
+                        << after.mpy << '\t' << after.sumet << std::defaultfloat << '\n';
+                    prefix("finalStatus") << "1\n";
+                    prefix("varianceMET") << "1\n";
+                }
+            }
+            if (trace_path) {
+                for (const auto action:{"makerAlg","builderAlg","significanceAlg"}) {
+                    trace << first_entry+event << '\t' << state_count << '\t' << action << "\t1\n";
                 }
             }
         }

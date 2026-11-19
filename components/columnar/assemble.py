@@ -36,13 +36,27 @@ def elf_deps(path):
     return deps
 
 
-def main(runtime: Path, output: Path):
+def main(runtime: Path, output: Path, core_source: Path, core_patch: Path):
     if sys.version_info[:2] != (3,14) or sys.platform != "linux":
         raise ValueError("Assemble from the selected CPython 3.14 Linux environment")
     source = Path(__file__).resolve().parent
+    from atlas_met_columnar import ASSOC, ASSOC_FIELDS, RAW_BRANCHES
+    from atlas_met_prepare import ADDITIONAL
+
+    core_head = subprocess.check_output(["git","-C",str(core_source),"rev-parse","HEAD"],text=True).strip()
+    if core_head != "3dcfa20ec01fb40c4d5fec58383785519dec1c00":
+        raise ValueError("Unexpected CorrectionLib upstream pin")
+    applied = subprocess.check_output(["git","-C",str(core_source),"diff","HEAD","--binary","--","src/correction.cc"])
+    if not applied or applied != core_patch.read_bytes():
+        raise ValueError("The supplied precision patch must match the applied Core source diff")
+    branch_manifest = {"tree":"CollectionTree","scalar_or_jagged":list(dict.fromkeys([*RAW_BRANCHES,*ADDITIONAL])),
+                       "nested_associations":[ASSOC+field for field in ASSOC_FIELDS],
+                       "memberwise_basket":[ASSOC+"jetLink"]}
+    branch_manifest_bytes = (json.dumps(branch_manifest,indent=2)+"\n").encode()
     files = {
         "atlas_met_columnar.py": (source/"atlas_met_columnar.py").read_bytes(),
         "atlas_met_prepare.py": (source/"atlas_met_prepare.py").read_bytes(),
+        "atlas_met_portable/source-layout.json": branch_manifest_bytes,
         "atlas_met_portable/__init__.py": (
             '"""Frozen ROOT-free MET provider and payloads."""\n'
             "from ctypes import CDLL, RTLD_GLOBAL\n"
@@ -82,10 +96,13 @@ def main(runtime: Path, output: Path):
         for name,data in sorted(files.items()):
             archive.writestr(name,data)
     shutil.copyfile(source/"met_demo.py",output/"met_demo.py")
+    (output/"source-layout.json").write_bytes(branch_manifest_bytes)
     with (output/"bundle.json").open("x") as handle:
         json.dump({"wheel":wheel.name, "wheel_bytes":wheel.stat().st_size,
                    "wheel_sha256":sha256(wheel.read_bytes()).hexdigest(),
-                   "core_commit":"3dcfa20ec01fb40c4d5fec58383785519dec1c00",
+                   "core_commit":core_head,
+                   "core_patch_sha256":sha256(applied).hexdigest(),
+                   "core_patched_correction_cc_sha256":sha256((core_source/"src"/"correction.cc").read_bytes()).hexdigest(),
                    "inputs":summary,"elf_needed":needed},handle,indent=2)
         handle.write("\n")
     print(wheel)

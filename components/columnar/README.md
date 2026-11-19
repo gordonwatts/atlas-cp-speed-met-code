@@ -61,17 +61,46 @@ Check ordered association and JVT actions against the independent stock trace. C
 ## Wheel and isolation
 
 ```bash
-"$python314" components/columnar/assemble.py "$runtime" "$fresh/bundle"
+"$python314" components/columnar/assemble.py "$runtime" "$fresh/bundle" \
+    "$PWD/vendor/correctionlib-exact-001" "$PWD/results/core-exact-build-001/core-local.patch"
 clean=(env -u PYTHONPATH -u PYTHONHOME -u LD_LIBRARY_PATH -u LD_PRELOAD -u ROOTSYS \
     -u ROOT_INCLUDE_PATH -u CMAKE_PREFIX_PATH -u ATLAS_LOCAL_ROOT_BASE -u VIRTUAL_ENV)
 "${clean[@]}" taskset -c 0 uv run --no-project --python "$python314" \
-    "$fresh/bundle/met_demo.py" "$input" "$fresh/uv-16.npz" --stop 16
+    "$fresh/bundle/met_demo.py" "$input" "$fresh/uv-16.npz" --stop 16 --runtime-record "$fresh/uv-runtime.json"
 "${clean[@]}" taskset -c 0 uv run --no-project --python "$python314" \
     "$fresh/bundle/met_demo.py" "$input" "$fresh/uv-16-repeat.npz" --stop 16 -n 2
 "${clean[@]}" "$python314" -m venv "$fresh/pip-env"
 "${clean[@]}" "$fresh/pip-env/bin/python" -m pip install "$fresh/bundle"/wheels/*.whl
 "${clean[@]}" taskset -c 0 "$fresh/pip-env/bin/python" \
-    "$fresh/bundle/met_demo.py" "$input" "$fresh/pip-16.npz" --stop 16
+    "$fresh/bundle/met_demo.py" "$input" "$fresh/pip-16.npz" --stop 16 --runtime-record "$fresh/pip-runtime.json"
+cmp "$fresh/uv-16.npz" "$fresh/uv-16-repeat.npz"
+cmp "$fresh/uv-16.npz" "$fresh/pip-16.npz"
+if "${clean[@]}" "$fresh/pip-env/bin/python" "$fresh/bundle/met_demo.py" \
+    "$input" "$fresh/invalid-repeat.npz" -n 0; then exit 1; fi
+if "${clean[@]}" "$fresh/pip-env/bin/python" "$fresh/bundle/met_demo.py" \
+    "$input" "$fresh/invalid-stop.npz" --stop -1; then exit 1; fi
+test ! -e "$fresh/invalid-repeat.npz" && test ! -e "$fresh/invalid-stop.npz"
 ```
 
 Record public dependency pins, wheel hash and bytes, all declared and live native dependencies and outputs in the isolated runtime receipts. Match the isolated single/repeat and pip outputs to the accepted original-stream candidate after its independent A gate. This source checkpoint does not establish those full numerical or isolation gates.
+
+
+## Independent comparison
+
+Production-mode comparison uses the independent AnalysisBase stock observer and stock status trace. Capture the optional C receipts in one pass:
+
+```bash
+stock="$PWD/results/reference-observer-full-001"
+status="$PWD/results/reference-status-full-001/status.tsv"
+hist="$PWD/results/reference-histogram-transport-001/histogram.npz"
+"$python314" components/columnar/met_demo.py "$input" "$fresh/c.npz" --runtime "$runtime" \
+    --observables "$fresh/c-observables.npz" --trace "$fresh/c-status.tsv" \
+    --runtime-record "$fresh/c-runtime.json"
+"$python314" components/columnar/compare.py "$stock" "$hist" "$fresh/c-observables.npz" \
+    "$fresh/c.npz" "$fresh/compare.json" --stock-trace "$status" --candidate-trace "$fresh/c-status.tsv" \
+    --expected-events 20000
+```
+
+The comparator records first failures and counts for original entry/run/event/DSID, term ordering, numerical tolerances and nonfinite classes, nominal p4 and exact gate bits per original object, ordered constituent links/weights, exact association writes and JVT decisions, tool success, soft seed and first Gaussian, per-event bin assignments, and saved histogram arrays. Stock shallow owner keys and C current keys are recorded together with their original owner. Retain both trace files independently. A signed seed plus Linux unsigned setter and uint32 effective seed witness the wrapping and zero fallback. Corr uses the independently collected two-state stock observer and its two-state status file. An optional runtime record lists actual original leaves loaded and missing, payload hashes, dependency versions and live mapped shared objects. The bundle manifest records both the patched parser file and patch hashes alongside the upstream pin and binary hashes.
+
+Remove diagnostics from timed commands. For the nominal-only path use the independent stock nominal observer/histogram. The prepared p4 and selection gates are state-independent in this frozen recipe.

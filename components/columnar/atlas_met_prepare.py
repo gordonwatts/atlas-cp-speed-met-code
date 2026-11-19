@@ -192,11 +192,12 @@ class Data:
         "TauTracks": "TauTracksAuxDyn.flagSet",
         "TruthTaus": "TruthTausAuxDyn.pdgId",
     }
-    def __init__(self, raw, output, keys, evaluate):
+    def __init__(self, raw, output, keys, evaluate, capture_preparation):
         # Split scalar ElementLinks are grouped as child-name dictionaries by uproot.
         # Zip their same-length event/object leaves into typed link records before indexing.
         self.raw = {name: ak.zip(value) if isinstance(value,dict) else value for name,value in raw.items()}
         self.output, self.keys, self.evaluate = output, keys, evaluate
+        self.capture_preparation = capture_preparation
         self.counts = {}
         self.events = {owner: roles_for_events(output[short+".o"]) for short,owner in OWNERS.items()}
 
@@ -238,6 +239,10 @@ class Data:
             self.output[name+".prep."+k] = np.ascontiguousarray(p4[:,i],dtype="f4")
         self.output[name+".selected"] = np.ascontiguousarray(selected,dtype="u1")
 
+    def gate_rows(self, name, *decisions):
+        if self.capture_preparation:
+            self.output[name+".gate"] = np.ascontiguousarray(np.column_stack(decisions),dtype="u4").ravel()
+
 
 def availability(out, name, values, valid):
     out[name+".value"] = np.ascontiguousarray(values,dtype="f4")
@@ -268,6 +273,7 @@ def prepare_tau(data):
                   truth_jet_link_available=np.full(n,int(TAU+"truthJetLink" in data.raw),"i8"))
     prepared=data.evaluate("tau_prepare",fields)
     data.publish("tau",prepared[:,:4],prepared[:,4])
+    data.gate_rows("tau",prepared[:,4])
     for name, field, dtype in (
         ("mode","PanTau_DecayMode","i4"),("tes_eta","etaTauEnergyScale","f4"),
         ("final_eta","etaFinalCalib","f4"),("final_pt","ptFinalCalib","f4"),
@@ -359,6 +365,7 @@ def prepare_muon(data, positions):
     decisions = data.evaluate("muon_selection_after_calibration",features)
     prepared = np.column_stack((features["pt"],features["eta"],features["phi"],np.full(n,105.658367)))
     data.publish("muon",prepared,decisions[:,5])
+    data.gate_rows("muon",features["eta_bits"],decisions[:,0],decisions[:,1],decisions[:,2],decisions[:,4])
     data.output["muon.type"] = muon_type
     data.output["muon.loss"] = data.own(MUON,"EnergyLoss")
     data.output["muon.loss_type"] = data.own(MUON,"energyLossType","u1")
@@ -435,6 +442,8 @@ def prepare_egamma(data, positions, short):
 
     prepared = data.evaluate(short+"_prepare",value)
     data.publish(short,prepared[:,:4],prepared[:,12])
+    gates = (4,5,6,7,9,10,11) if photon else (4,5,7,8,9,10,11)
+    data.gate_rows(short,*(prepared[:,index] for index in gates))
     availability(data.output,short+".cluster_eta",value["cluster_eta"],cluster_eta)
     availability(data.output,short+".eta_calo_moment",value["eta_calo"],calo_eta)
     eta_aux, have_aux = cluster.column("etaCalo")
@@ -445,8 +454,8 @@ def prepare_egamma(data, positions, short):
         data.output["photon.vertex_count"] = dense(ak.num(ak.flatten(data.raw[owner+"vertexLinks"],axis=1),axis=1),"u4")
 
 
-def prepare_chunk(output, raw, keys, evaluate):
-    data = Data(raw,output,keys,evaluate)
+def prepare_chunk(output, raw, keys, evaluate, capture_preparation=False):
+    data = Data(raw,output,keys,evaluate,capture_preparation)
     for name, field, dtype in (
         ("run","runNumber","u4"),("type","eventTypeBitmask","u4"),
         ("actual_mu","actualInteractionsPerCrossing","f4"),

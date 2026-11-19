@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+from importlib.metadata import version
 import json
 from pathlib import Path
 import sys
@@ -67,6 +68,31 @@ def read_owner_keys(runtime):
     return owners
 
 
+def save_runtime_record(output, runtime, input_layout):
+    paths = set()
+    for row in Path("/proc/self/maps").read_text().splitlines():
+        fields = row.split(maxsplit=5)
+        if len(fields) == 6 and fields[5].startswith("/"):
+            paths.add(fields[5])
+    shared_objects = sorted(path for path in paths if ".so" in Path(path).name)
+    forbidden = tuple(path for path in shared_objects if "/cvmfs/" in path or
+                      Path(path).name.startswith(("libCore.so","libRIO.so","libTree.so","libHist.so",
+                                                  "libMathCore.so","libxAOD","libAthena")))
+    required = {"libatlas_met_columnar.so", "libatlas_met_maker_correction.so",
+                "libatlas_met_maker_provider.so", "libmet_preparation_provider.so", "libcorrectionlib.so"}
+    basenames = {Path(path).name for path in shared_objects}
+    if forbidden or not required <= basenames:
+        raise RuntimeError(f"Unexpected live libraries: forbidden={forbidden}, missing={required-basenames}")
+    payloads = {name.name: hashlib.sha256(name.read_bytes()).hexdigest()
+                for name in sorted((runtime/"payloads").glob("*.json"))}
+    dependencies = {name:version(name) for name in ("awkward","uproot","numpy","hist","typer")}
+    with output.open("x") as handle:
+        json.dump({"python":sys.version,"dependencies":dependencies,"input_uuid":UUID,
+                   "input_layout":input_layout,"payload_sha256":payloads,
+                   "mapped_shared_objects":shared_objects},handle,indent=2)
+        handle.write("\n")
+
+
 def main(
     input_file: Path, output: Path,
     runtime: Path | None = None,
@@ -77,11 +103,13 @@ def main(
     correlated_diagnostic: bool = False,
     trace: Path | None = None,
     observables: Path | None = None,
+    runtime_record: Path | None = None,
 ):
     if sys.version_info[:2] != (3, 14):
         raise ValueError("This demonstration requires CPython 3.14")
-    if output.exists():
-        raise FileExistsError(output)
+    for path in (output,observables,trace,runtime_record):
+        if path is not None and path.exists():
+            raise FileExistsError(path)
     if repeat != 1 and (trace or observables):
         raise ValueError("Per-event diagnostics require one input pass")
     if correlated_diagnostic and nominal_only:
@@ -109,6 +137,7 @@ def main(
     obs_terms, obs_sources, obs_sig = [], [], []
     obs_ids = {"event.number": [], "event.run": [], "event.dsid": []}
     expected_digest = None
+    input_layout = None
     try:
         bridge.configure(context,payloads/"soft.json",payloads/"significance.json",
                          native_path/"libmet_preparation_provider.so",payloads/"preparation.json")
@@ -124,6 +153,12 @@ def main(
                 end = tree.num_entries if stop is None else min(stop,tree.num_entries)
                 fields = list(dict.fromkeys([*RAW_BRANCHES,*(f for f in ADDITIONAL if f in tree)]))
                 link_reader = MemberwiseJets(bridge,tree[ASSOC][ASSOC+"jetLink"])
+                if runtime_record is not None:
+                    from atlas_met_columnar import ASSOC_FIELDS
+                    input_layout = {"tree":"CollectionTree","loaded_branches":fields,
+                                    "supported_but_absent":[f for f in ADDITIONAL if f not in tree],
+                                    "nested_associations":[ASSOC+f for f in ASSOC_FIELDS],
+                                    "memberwise_basket":[ASSOC+"jetLink"]}
                 for first in range(0,end,chunk_size):
                     last = min(first+chunk_size,end)
                     raw = tree.arrays(fields,entry_start=first,entry_stop=last,library="ak",how=dict)
@@ -132,7 +167,7 @@ def main(
                     # Nominal corrections are explicitly selected by their declared names
                     # in the raw preparation projections and evaluated on each typed batch.
                     evaluate = lambda name, inputs: bridge.prepare(context,name,inputs)
-                    prepare_chunk(buffers,raw,keys,evaluate)
+                    prepare_chunk(buffers,raw,keys,evaluate,capture_preparation=trace is not None)
                     # The native chunk calls shared maker, correct_pvsofttrk, build_final,
                     # and met_significance_event in event order, with the explicit labels.
                     terms,sources,significance = bridge.full(context,buffers,first,last-first,labels,trace)
@@ -152,6 +187,8 @@ def main(
             if expected_digest is not None and expected_digest != digest:
                 raise RuntimeError("Repeated original file passes did not produce identical yields")
             expected_digest = digest
+        if runtime_record is not None:
+            save_runtime_record(runtime_record, runtime, input_layout)
     finally:
         bridge.lib.met_columnar_close(context)
     save(histogram,labels,entries,output)
