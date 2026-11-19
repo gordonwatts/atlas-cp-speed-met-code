@@ -29,9 +29,32 @@ def cpu_seconds() -> float:
     return usage.ru_stime + usage.ru_utime
 
 
+def process_children(process: Path) -> list[str]:
+    return (process / "task" / process.name / "children").read_text().split()
+
+
+def sampled_descendant(pid: str) -> dict:
+    process = Path(f"/proc/{pid}")
+    try:
+        name = (process / "comm").read_text().strip()
+        argv = (process / "cmdline").read_bytes().decode(errors="replace").rstrip("\0").split("\0")
+        stats = (process / "stat").read_text().rpartition(")")[2].split()
+        status = dict(line.split(":", 1) for line in (process / "status").read_text().splitlines() if ":" in line)
+        children = {child: sampled_descendant(child) for child in process_children(process)}
+        return {
+            "name": name, "arguments": argv, "state": stats[0],
+            "start_since_boot_seconds": int(stats[19]) / os.sysconf("SC_CLK_TCK"),
+            "affinity": status["Cpus_allowed_list"].strip(), "threads": int(status["Threads"]),
+            "descendants": children,
+        }
+    except (FileNotFoundError, ProcessLookupError, PermissionError):
+        return {"state": "exited_or_unreadable"}
+
+
 def monitor(
     pid: int, done: threading.Event, rows: list,
-    probe_names: tuple[str, ...], mappings: set[str],
+    probe_names: tuple[str, ...], mappings: set[str], sample_seconds: float,
+    launch_ns: int, log: Path,
 ) -> None:
     other_cpus = set(os.sched_getaffinity(0)) - {CPU}
     if other_cpus:
@@ -39,10 +62,12 @@ def monitor(
     proc = Path(f"/proc/{pid}")
     while not done.is_set():
         try:
+            elapsed_ns = time.perf_counter_ns() - launch_ns
             status = dict(line.split(":", 1) for line in (proc / "status").read_text().splitlines() if ":" in line)
             executable = str((proc / "exe").readlink())
-            children = (proc / "task" / str(pid) / "children").read_text().split()
+            children = process_children(proc)
             if "python" in Path(executable).name:
+                child_processes = {child: sampled_descendant(child) for child in children}
                 if probe_names:
                     for line in (proc / "maps").read_text().splitlines():
                         fields = line.split(maxsplit=5)
@@ -53,16 +78,19 @@ def monitor(
                     "affinity": status["Cpus_allowed_list"].strip(),
                     "threads": int(status["Threads"]),
                     "children": children,
+                    "child_processes": child_processes,
+                    "log_bytes_visible_at_sample": log.stat().st_size if children else None,
+                    "elapsed_seconds": elapsed_ns * 1e-9,
                     "executable": executable,
                 })
         except (FileNotFoundError, ProcessLookupError, KeyError):
             break
-        done.wait(0.1)
+        done.wait(sample_seconds)
 
 
 def run(
     command: list[str], environment: dict, cwd: Path, log: Path,
-    probe_names: tuple[str, ...] = (),
+    probe_names: tuple[str, ...] = (), sample_seconds: float = 0.1,
 ) -> dict:
     command = ["taskset", "-c", str(CPU), *command]
     events = []
@@ -73,7 +101,9 @@ def run(
         before_cpu = cpu_seconds()
         start = time.perf_counter_ns()
         child = subprocess.Popen(command, cwd=cwd, env=environment, stdout=output, stderr=subprocess.STDOUT)
-        sampler = threading.Thread(target=monitor, args=(child.pid, finished, events, probe_names, mappings))
+        sampler = threading.Thread(
+            target=monitor, args=(child.pid, finished, events, probe_names, mappings, sample_seconds, start, log)
+        )
         sampler.start()
         status = child.wait()
         end = time.perf_counter_ns()

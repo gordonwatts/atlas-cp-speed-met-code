@@ -32,6 +32,35 @@ def receipt(path: Path) -> dict:
     return {"path": str(resolved), "sha256": sha256(resolved.read_bytes()).hexdigest()}
 
 
+def startup_diagnostic(framework: dict, log: Path) -> dict:
+    marker = log.read_bytes().find(b"Processing events ")
+    observed = {}
+    for row in framework["samples"]:
+        for pid, child in row["child_processes"].items():
+            descriptor = observed.setdefault(pid, {"samples": [], "verified_startup_commands": []})
+            argv = child.get("arguments", [])
+            kind = None
+            if argv[:2] == ["sh", "-c"] and len(argv) == 3:
+                if argv[2] == "LD_DEBUG=libs LD_PRELOAD=DOESNOTEXIST ls 2>&1":
+                    kind = "ROOT shared library search"
+                if argv[2].startswith("LC_ALL=C g++") and "-xc++ -E -v /dev/null" in argv[2] and "| sed " in argv[2]:
+                    kind = "Cling compiler include-path query"
+            if len(argv) == 3 and argv[:2] == ["/usr/bin/bash", "/usr/bin/ldd"] and "/AnalysisBaseExternals/" in argv[2]:
+                kind = "ROOT ldd query of release Python"
+            before_processing = marker >= 0 and row["log_bytes_visible_at_sample"] <= marker
+            descriptor["samples"].append({
+                **child, "elapsed_seconds": row["elapsed_seconds"], "before_processing_log_marker": before_processing,
+            })
+            if kind is not None and before_processing and child["threads"] == 1 and child["affinity"] == "0":
+                if kind not in descriptor["verified_startup_commands"]:
+                    descriptor["verified_startup_commands"].append(kind)
+    return {
+        "affects_strict_process_gate": False,
+        "event_processing_log_marker_offset": marker if marker >= 0 else None,
+        "observed_children": observed,
+    }
+
+
 def quality(values: list[float], process_ok: bool) -> dict:
     mean = statistics.mean(values)
     sd = statistics.stdev(values)
@@ -172,7 +201,8 @@ def benchmark(
                     expected = {str(x.resolve()) for x in (bridge, provider, core)}
                     verified = expected <= mappings if path == "B" else not expected & mappings
                     trial.update(framework=framework, framework_valid=framework["valid"] and verified,
-                                 framework_seconds=framework["wall_seconds"])
+                                 framework_seconds=framework["wall_seconds"],
+                                 startup_diagnostic=startup_diagnostic(framework, cwd / "framework.log"))
                     identity_ok = verified
                     success = framework["exit_code"] == 0
                     if success:
