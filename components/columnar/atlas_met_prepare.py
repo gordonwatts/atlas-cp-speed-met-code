@@ -84,6 +84,36 @@ def dense(array, dtype, default=0):
     return np.ascontiguousarray(ak.to_numpy(ak.fill_none(array, default)), dtype=dtype)
 
 
+def full_numpy_span(array):
+    if (type(array) is not np.ndarray or array.ndim!=1 or
+            not array.flags.c_contiguous or not array.flags.aligned or not array.dtype.isnative):
+        return False
+    # Reject subviews, including trimmed empty events whose offset values
+    # still span the full content. The raw NumPy allocation remains the owner.
+    base = array.base
+    return base is None or (type(base) is np.ndarray and base.nbytes==array.nbytes and
+                            base.ctypes.data==array.ctypes.data)
+
+
+def original_scalar_view(array, owner_offsets):
+    if type(array) is not ak.Array or array.behavior or array.attrs:
+        return None
+    layout = ak.to_layout(array)
+    if type(layout) is not ak.contents.ListOffsetArray or layout.parameters:
+        return None
+    content = layout.content
+    if type(content) is not ak.contents.NumpyArray or content.parameters:
+        return None
+    offsets, values = layout.offsets.data, content.data
+    if (not full_numpy_span(offsets) or offsets.dtype!=np.dtype("i8") or
+            not full_numpy_span(values) or values.dtype.kind not in "biuf"):
+        return None
+    if (not offsets.size or offsets[0]!=0 or offsets[-1]!=values.size or
+            not np.array_equal(offsets,owner_offsets) or np.any(offsets[1:]<offsets[:-1])):
+        return None
+    return values
+
+
 def roles_for_events(offs):
     return np.repeat(np.arange(len(offs)-1, dtype="i8"), np.diff(offs))
 
@@ -160,6 +190,13 @@ class Resolved:
             empty_projection = (name,dtype,type(default),default,slot,lengths) if not rows.size else None
             if empty_projection is not None and empty_projection in self.data.validated_empty_columns:
                 continue
+            if (rows.size and rows.dtype==np.dtype("i8") and slot is None and not lengths and
+                    output.dtype.kind in "biuf" and type(default) in (bool,int,float)):
+                values = self.data.scalar_view(name,target,rows)
+                if values is not None:
+                    output[local] = np.ascontiguousarray(values[rows],dtype=output.dtype)
+                    present[local] = True
+                    continue
             source = ak.flatten(self.data.raw[name], axis=1)[rows]
             if lengths:
                 source = ak.num(source, axis=1)
@@ -248,7 +285,16 @@ class Data:
         self.counts = {}
         self.sampling_columns = {}
         self.validated_empty_columns = set()
+        self.scalar_views = {}
         self.events = {owner: roles_for_events(output[short+".o"]) for short,owner in OWNERS.items()}
+
+    def scalar_view(self, name, target, rows):
+        if name not in self.scalar_views:
+            self.scalar_views[name] = original_scalar_view(self.raw[name],self.offset(self.anchors[target]))
+        values = self.scalar_views[name]
+        if values is None or rows.min()<0 or rows.max()>=values.size:
+            return None
+        return values
 
     def offset(self, anchor):
         if anchor not in self.counts:
