@@ -88,10 +88,6 @@ def roles_for_events(offs):
     return np.repeat(np.arange(len(offs)-1, dtype="i8"), np.diff(offs))
 
 
-def file_columns(arrays):
-    return {name: value for name, value in arrays.items()}
-
-
 class Link:
     def __init__(self, array):
         if len(array)==0:
@@ -197,7 +193,10 @@ class Data:
         "TruthTaus": "TruthTausAuxDyn.pdgId",
     }
     def __init__(self, raw, output, keys, evaluate):
-        self.raw, self.output, self.keys, self.evaluate = raw, output, keys, evaluate
+        # Split scalar ElementLinks are grouped as child-name dictionaries by uproot.
+        # Zip their same-length event/object leaves into typed link records before indexing.
+        self.raw = {name: ak.zip(value) if isinstance(value,dict) else value for name,value in raw.items()}
+        self.output, self.keys, self.evaluate = output, keys, evaluate
         self.counts = {}
         self.events = {owner: roles_for_events(output[short+".o"]) for short,owner in OWNERS.items()}
 
