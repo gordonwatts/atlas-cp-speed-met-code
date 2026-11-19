@@ -29,10 +29,23 @@ template<class Method>
 Method original_entry(const char* symbol)
 {
     dlerror();
-    const auto method = reinterpret_cast<Method>(dlsym(RTLD_NEXT, symbol));
-    if (const char* error = dlerror()) throw std::runtime_error(error);
-    if (!method) throw std::runtime_error(std::string("Unavailable stock symbol: ") + symbol);
-    return method;
+    auto address = dlsym(RTLD_NEXT, symbol);
+    const bool next_error = dlerror() != nullptr;
+    if (next_error || !address) {
+        void* stock = dlopen("libMetAnalysisAlgorithmsLib.so", RTLD_LAZY | RTLD_NOLOAD);
+        if (!stock) throw std::runtime_error("The pinned stock MET algorithms library is not loaded");
+        dlerror();
+        address = dlsym(stock, symbol);
+        const bool failed = dlerror() != nullptr;
+        dlclose(stock);
+        if (failed) address = nullptr;
+    }
+    Dl_info resolved{};
+    if (!address || !dladdr(address, &resolved) || !resolved.dli_fname
+        || !std::string_view(resolved.dli_fname).ends_with("/libMetAnalysisAlgorithmsLib.so")) {
+        throw std::runtime_error(std::string("Unavailable verified stock symbol: ") + symbol);
+    }
+    return reinterpret_cast<Method>(address);
 }
 
 template<class Algorithm>

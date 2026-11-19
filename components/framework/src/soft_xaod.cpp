@@ -5,7 +5,9 @@
 #include "maker_xaod.hpp"
 #include "soft.hpp"
 
+#include <AsgDataHandles/VarHandleKey.h>
 #include <AsgDataHandles/ReadHandle.h>
+#include <utility>
 #include <AthContainers/Decorator.h>
 #include <xAODEventInfo/EventInfo.h>
 
@@ -78,7 +80,7 @@ StatusCode build_final(xAOD::MissingETContainer& met)
     total->setName(std::string(soft::final_name));
     total->setSource(soft::final_source);
     write(*total, result.momentum);
-    for (const auto* term : met) {
+    for (const auto* term : std::as_const(met)) {
         const auto decorations = term == total ? result.decorations : payload().decorate(momentum(*term));
         met_decoration(*term) = decorations.met;
         phi_decoration(*term) = decorations.phi;
