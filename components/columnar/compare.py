@@ -70,6 +70,8 @@ def frame_trace(handle, entries):
 
 
 def numeric_match(a, b, quantity):
+    if a == b:
+        return True
     reference, given = (np.asarray([value],dtype="f4") for value in (a,b))
     return compare_numeric(reference,given,quantity)["total_failures"] == 0
 
