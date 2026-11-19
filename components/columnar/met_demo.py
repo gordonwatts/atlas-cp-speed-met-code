@@ -26,7 +26,7 @@ import typer
 import uproot
 
 from atlas_met_columnar import ASSOC, ASSOC_FIELDS, RAW_BRANCHES, MemberwiseJets, Native, pack_raw, read_associations
-from atlas_met_prepare import ADDITIONAL, prepare_chunk
+from atlas_met_prepare import ADDITIONAL, JET, prepare_chunk
 
 UUID = "79ee6652-311f-11f1-aa37-0445010abeef"
 STATES = ["NOSYS", "MET_SoftTrk_ResoPara", "MET_SoftTrk_ResoPerp",
@@ -54,6 +54,14 @@ def save(histogram, labels, entries, output):
     with output.open("xb") as file:
         np.savez(file, state_labels=np.asarray(labels), bin_edges_gev=histogram.axes[1].edges,
                  counts=counts, sumw=sumw, sumw2=sumw2)
+
+
+def projected_fields(tree):
+    additional = [name for name in ADDITIONAL if name in tree]
+    sampling = JET + "EnergyPerSampling"
+    if JET + "PSFrac" in additional and sampling in additional:
+        additional.remove(sampling)
+    return list(dict.fromkeys([*RAW_BRANCHES, *additional]))
 
 
 def read_owner_keys(runtime):
@@ -151,7 +159,7 @@ def main(
                     raise ValueError("This payload and the event-local link inventory are pinned to the original file")
                 tree = original["CollectionTree"]
                 end = tree.num_entries if stop is None else min(stop,tree.num_entries)
-                fields = list(dict.fromkeys([*RAW_BRANCHES,*(f for f in ADDITIONAL if f in tree)]))
+                fields = projected_fields(tree)
                 link_reader = MemberwiseJets(bridge,tree[ASSOC][ASSOC+"jetLink"])
                 if runtime_record is not None:
                     input_layout = {"tree":"CollectionTree","loaded_branches":fields,
