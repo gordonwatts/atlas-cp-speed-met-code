@@ -24,8 +24,15 @@ def numerical_quantity(branch: str, states: list[str]) -> tuple[str, str] | None
 
 
 def compare_numeric(original, candidate, quantity: str) -> dict:
-    expected = ak.to_numpy(original).astype(np.float64)
-    actual = ak.to_numpy(candidate).astype(np.float64)
+    expected_storage = ak.to_numpy(original)
+    actual_storage = ak.to_numpy(candidate)
+    if expected_storage.shape != actual_storage.shape or expected_storage.dtype != actual_storage.dtype:
+        raise ValueError(
+            f"{quantity} storage differs: {expected_storage.shape} {expected_storage.dtype} "
+            f"versus {actual_storage.shape} {actual_storage.dtype}"
+        )
+    expected = expected_storage.astype(np.float64)
+    actual = actual_storage.astype(np.float64)
     exact = expected == actual
     equal_classification = np.isfinite(expected) == np.isfinite(actual)
     for predicate in (np.isnan, np.isposinf, np.isneginf):
@@ -44,6 +51,7 @@ def compare_numeric(original, candidate, quantity: str) -> dict:
     violation[finite] |= abs(delta[finite]) > (local_atol + local_rtol * abs(expected[finite]))
     failed = np.argwhere(violation)
     return {
+        "shape": list(expected_storage.shape), "storage_dtype": str(expected_storage.dtype),
         "values": expected.size, "exact_finite": int(np.count_nonzero(exact & finite)),
         "max_absolute_difference": float(np.max(abs(delta), initial=0)),
         "nonfinite_classification_failures": int(np.count_nonzero(~equal_classification)),
@@ -52,7 +60,10 @@ def compare_numeric(original, candidate, quantity: str) -> dict:
 
 
 @app.command()
-def compare(stock_dir: Path, candidate_dir: Path, output_file: Path) -> None:
+def compare(
+    stock_dir: Path, candidate_dir: Path, output_file: Path,
+    expected_events: int | None = None,
+) -> None:
     with root_file(stock_dir / "hist-reference.root") as stock_h, root_file(candidate_dir / "hist-candidate.root") as cand_h:
         states = stock_h["systematicsList"].axis().labels()
         assert states == cand_h["systematicsList"].axis().labels()
@@ -63,11 +74,16 @@ def compare(stock_dir: Path, candidate_dir: Path, output_file: Path) -> None:
         cand_fields = candidate.keys(recursive=False)
         assert set(stock_fields) == set(cand_fields)
         assert 0 < n_events <= stock.num_entries
+        if expected_events is not None:
+            assert n_events == expected_events, (n_events, expected_events)
+        identifiers = stock["eventNumber"].array(entry_stop=n_events, library="np") if "eventNumber" in stock else None
         report = {
             "events": n_events, "state_order": states,
             "numerical_checks": {}, "discrete_failures": [], "histogram_per_event_bin_failures": {},
         }
         for branch in stock_fields:
+            if stock[branch].typename != candidate[branch].typename:
+                raise ValueError(f"ROOT storage types differ for {branch}")
             expected = stock[branch].array(entry_stop=n_events)
             given = candidate[branch].array()
             key = numerical_quantity(branch, states)
@@ -83,6 +99,7 @@ def compare(stock_dir: Path, candidate_dir: Path, output_file: Path) -> None:
             changed = np.flatnonzero(np.searchsorted(edges, expected, side="right") != np.searchsorted(edges, observed, side="right"))
             report["histogram_per_event_bin_failures"][state] = {
                 "count": len(changed), "first_failure_entries": changed[:8].tolist(),
+                "first_failure_event_numbers": identifiers[changed[:8]].tolist() if identifiers is not None else [],
             }
     report["passed"] = (
         not report["discrete_failures"]
