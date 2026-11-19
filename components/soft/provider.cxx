@@ -34,6 +34,8 @@ struct Invocation {
     std::optional<SoftResult>* corrected = nullptr;
     std::span<const Term> terms;
     std::optional<FinalResult>* final = nullptr;
+    FirstGaussianCache* gaussian_cache = nullptr;
+    FirstGaussianUse* gaussian_use = nullptr;
 };
 
 class Binding {
@@ -132,11 +134,12 @@ public:
         if (!binding.event || !binding.corrected || binding.corrected->has_value()) {
             throw std::logic_error("Wrong or repeated MET soft bound operation");
         }
-        return static_cast<double>(binding.corrected->emplace(apply(*binding.event, args)).status);
+        return static_cast<double>(binding.corrected->emplace(apply(binding, args)).status);
     }
 
 private:
-    SoftResult apply(const EventView& event, const Args& args) const {
+    SoftResult apply(const Invocation& binding, const Args& args) const {
+        const auto& event = *binding.event;
         SoftResult result{};
         const auto state = variation(std::get<std::string>(args.at(state_)));
         if (!state) {
@@ -193,7 +196,13 @@ private:
         coords[njet_] = static_cast<double>(jet.size);
         coords[mu_] = overflow_nan(event.actual_mu);
         result.shift = tables_[0]->evaluate(coords);
-        result.gaussian = root_rng::first_gaussian(result.seed.effective);
+        if (binding.gaussian_cache) {
+            const auto draw = binding.gaussian_cache->first(result.seed.effective);
+            result.gaussian = draw.value;
+            *binding.gaussian_use = draw.use;
+        } else {
+            result.gaussian = root_rng::first_gaussian(result.seed.effective);
+        }
         result.drew = true;
 
         switch (*state) {
@@ -311,6 +320,14 @@ Result confirm_result(double evaluated, std::optional<Result> result) {
 
 } // namespace
 
+FirstGaussianCache::Draw FirstGaussianCache::first(std::uint32_t effective_seed) {
+    if (seed_ != 0 && seed_ == effective_seed) return {value_, FirstGaussianUse::reused};
+    const double value = root_rng::first_gaussian(effective_seed);
+    seed_ = effective_seed;
+    value_ = value;
+    return {value_, FirstGaussianUse::evaluated};
+}
+
 struct SoftFile::Impl {
     explicit Impl(const std::string& path) : domain(std::make_shared<const Domain>()), set(load(path, domain)),
         correct(set->at("correct_pvsofttrk")), final(set->at("build_final")), decorate(set->at("met_phi")) {}
@@ -328,9 +345,20 @@ SoftFile::SoftFile(SoftFile&&) noexcept = default;
 SoftFile& SoftFile::operator=(SoftFile&&) noexcept = default;
 
 SoftResult SoftFile::apply(const EventView& input, std::string_view state) const {
+    return apply_bound(input, state, nullptr, nullptr);
+}
+
+SoftResult SoftFile::apply_cached_first_gaussian(const EventView& input, std::string_view state,
+                                                FirstGaussianCache& cache, FirstGaussianUse& use) const {
+    use = FirstGaussianUse::skipped;
+    return apply_bound(input, state, &cache, &use);
+}
+
+SoftResult SoftFile::apply_bound(const EventView& input, std::string_view state,
+                                 FirstGaussianCache* cache, FirstGaussianUse* use) const {
     if (!implementation_) throw std::logic_error("Moved-from MET soft provider");
     std::optional<SoftResult> result;
-    const Binding binding{*implementation_->domain, {&input, &result, {}, nullptr}};
+    const Binding binding{*implementation_->domain, {&input, &result, {}, nullptr, cache, use}};
     const double status = implementation_->correct->evaluate({binding.ticket(), std::string(state), 0., 0., 0.});
     return confirm_result(status, std::move(result));
 }

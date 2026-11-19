@@ -84,6 +84,28 @@ struct SoftResult {
     double varied_perp{};
 };
 
+enum class FirstGaussianUse { skipped, evaluated, reused };
+
+// A single-slot cache for the first draw of the reseeded ROOT stream. Its
+// owner keeps it within one event and one execution thread.
+class FirstGaussianCache {
+public:
+    struct Draw {
+        double value;
+        FirstGaussianUse use;
+    };
+
+    FirstGaussianCache() = default;
+    FirstGaussianCache(const FirstGaussianCache&) = delete;
+    FirstGaussianCache& operator=(const FirstGaussianCache&) = delete;
+
+    Draw first(std::uint32_t effective_seed);
+
+private:
+    std::uint32_t seed_{};
+    double value_{};
+};
+
 inline constexpr std::string_view final_name = "Final";
 inline constexpr std::uint64_t final_source = 0x10040;
 
@@ -114,10 +136,13 @@ public:
     SoftFile& operator=(SoftFile&&) noexcept;
 
     SoftResult apply(const EventView&, std::string_view state) const;
+    SoftResult apply_cached_first_gaussian(const EventView&, std::string_view state,
+                                           FirstGaussianCache&, FirstGaussianUse&) const;
     FinalResult build_final(std::span<const Term> terms) const;
     MetPhi decorate(Momentum) const;
 
 private:
+    SoftResult apply_bound(const EventView&, std::string_view, FirstGaussianCache*, FirstGaussianUse*) const;
     struct Impl;
     std::unique_ptr<Impl> implementation_;
 };

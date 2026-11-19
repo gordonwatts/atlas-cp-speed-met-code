@@ -790,6 +790,7 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
             }
             std::vector<AssociationStorage> association_storage;
             const auto map=association.event(event,objects,association_storage);
+            sf::FirstGaussianCache first_gaussian;
             m::EventInput input{};
             input.input_particles=view.originals;
             input.jets=view.jets;
@@ -817,7 +818,9 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
                 const auto type=at(cols.get<std::uint32_t>("event.type"),event);
                 const sf::EventView soft_event{rebuilt,truth_terms,
                     at(cols.get<float>("event.actual_mu"),event),true,true,(type&1U)!=0,true};
-                const auto corrected=bundle->soft->apply(soft_event,states[state]);
+                sf::FirstGaussianUse gaussian_use{};
+                const auto corrected=bundle->soft->apply_cached_first_gaussian(
+                    soft_event,states[state],first_gaussian,gaussian_use);
                 if (corrected.status!=sf::Status::success || !corrected.term_index) {
                     throw std::runtime_error("C soft status "+std::to_string(static_cast<int>(corrected.status))
                                              +" "+stamp);
@@ -853,6 +856,9 @@ extern "C" int met_columnar_full(MetColumnar* bundle, std::size_t events, std::u
                     prefix("setRandomSeed") << corrected.seed.setter_argument << '\n';
                     prefix("seed") << corrected.seed.truncated << '\t' << corrected.seed.effective << '\t'
                                   << (corrected.drew ? "called" : "skipped") << '\n';
+                    const auto gaussian_label=gaussian_use==sf::FirstGaussianUse::evaluated ? "evaluated"
+                        : gaussian_use==sf::FirstGaussianUse::reused ? "reused" : "skipped";
+                    prefix("firstGaussian") << corrected.seed.effective << '\t' << gaussian_label << '\n';
                     if (corrected.drew) {
                         prefix("gaussian") << std::hexfloat << 0. << '\t' << 1. << '\t'
                             << corrected.gaussian << std::defaultfloat << '\n';
