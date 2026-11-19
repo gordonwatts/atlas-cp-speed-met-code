@@ -189,8 +189,9 @@ def extract_pointing(f, probes):
                          numbers(axis.GetBinUpEdge(i) for i in range(1, n+1)),
                          numbers(axis.GetBinWidth(i) for i in range(1, n+1))))
     nx, ny = (axis.GetNbins() for axis in axes)
-    regular_content = [float(hist.GetBinContent(hist.GetBin(i, j))) for i in range(1, nx+1)
-                       for j in range(1, ny+1)]
+    indices = (hist.GetBin(i, j) for i in range(1, nx+1) for j in range(1, ny+1))
+    regular_content = [float(hist.GetBinContent(index)) if hist.GetBinEntries(index) > 0 else 0.
+                       for index in indices]
     table = {
         "nodetype": "multibinning", "inputs": ["rz_x", "rz_y"], "flow": "error",
         "edges": [[float(axis.GetBinLowEdge(i)) for i in range(1, axis.GetNbins()+2)] for axis in axes],
@@ -222,11 +223,13 @@ def export(
     validate_config(reference_config)
     import ROOT
     ROOT.PyConfig.IgnoreCommandLineOptions = True
-    if ROOT.gSystem.Load("libPathResolver") < 0:
-        raise RuntimeError("Load the AnalysisBase release before exporting")
+    if os.environ.get("AtlasVersion") != "25.2.117" or str(ROOT.gROOT.GetVersion()).replace("/", ".") != "6.40.02":
+        raise RuntimeError("Source AnalysisBase 25.2.117 first")
+    if ROOT.gSystem.Load("libPathResolverDict") < 0:
+        raise RuntimeError("Missing release PathResolver")
     resolved = {}
     for kind, (asset, expected_hash) in FILES.items():
-        value = str(ROOT.PathResolverFindCalibFile(asset))
+        value = str(ROOT.PathResolver.FindCalibFile(asset))
         if not value:
             raise FileNotFoundError(asset)
         path = Path(value).resolve(strict=True)
@@ -263,7 +266,7 @@ def export(
     payload = output_dir / "egamma.json"
     temporary = payload.with_suffix(".tmp")
     temporary.write_text(json.dumps({
-        "schema_version": 2, "description": "AnalysisBase 25.2.117 fixed nominal MET egamma preparation",
+        "schema_version": 3, "description": "AnalysisBase 25.2.117 fixed nominal MET egamma preparation",
         "corrections": corrections,
     }, allow_nan=False, separators=(",", ":")) + "\n")
     os.replace(temporary, payload)
