@@ -13,7 +13,7 @@ flags=(
 )
 libraries=(
   -L "$AnalysisBase_DIR/lib" -Wl,-z,defs
-  -lxAODMissingET -lPATInterfaces -lAthContainers -lCxxUtils -L "$(root-config --libdir)" -lCore -ldl
+  -lxAODMissingET -lxAODBase -lxAODJet -lxAODRootAccess -lxAODRootAccessInterfaces -lAthLinks -lSystematicsHandlesLib -lSelectionHelpersLib -lAsgDataHandlesLib -lPATInterfaces -lAthContainers -lCxxUtils -L "$(root-config --libdir)" -lCore -ldl
 )
 exec g++ "${root_flags[@]}" "${flags[@]}" "$1/observer/status_trace.cxx" "${libraries[@]}" -o "$2/libmet_stock_trace.so"
 ' bash "$repo" "$build" > "$build/build.log" 2>&1

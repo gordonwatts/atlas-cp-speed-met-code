@@ -29,8 +29,16 @@ taskset -c 0 bash -c '
 source "$1" || exit
 export ROOT_MAX_THREADS=1
 if [[ -n ${MET_TRACE_LIBRARY:-} ]]; then
-  export LD_PRELOAD="$MET_TRACE_LIBRARY"
+  unset LD_PRELOAD LD_DEBUG LD_DEBUG_OUTPUT
   export MET_STOCK_TRACE="$PWD/status.tsv"
+  shift
+  exec python -c "
+import ctypes, os, runpy, sys
+library = ctypes.CDLL(os.environ[\"MET_TRACE_LIBRARY\"], mode=ctypes.RTLD_GLOBAL)
+runner = os.path.join(os.environ[\"AnalysisBase_DIR\"], \"bin\", \"CPRun.py\")
+sys.argv = [runner, *sys.argv[1:]]
+runpy.run_path(runner, run_name=\"__main__\")
+" "$@"
 fi
 shift
 exec python "$AnalysisBase_DIR/bin/CPRun.py" "$@"

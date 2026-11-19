@@ -10,6 +10,8 @@
 #include <TRandom.h>
 #include <TRandom3.h>
 #include <xAODMissingET/MissingETAssociationHelper.h>
+#include <AthContainers/AuxElement.h>
+#include <AthLinks/ElementLink.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -64,6 +66,44 @@ std::FILE* trace_file() {
   return output;
 }
 
+std::FILE* prepared_p4_file() {
+  static std::FILE* output = []() -> std::FILE* {
+    const char* path = std::getenv("MET_STOCK_PREPARED_P4");
+    if (!path) return nullptr;
+    auto* file = std::fopen(path, "wx");
+    if (!file) {
+      std::fputs("MET prepared p4 trace requires a fresh file\n", stderr);
+      std::abort();
+    }
+    return file;
+  }();
+  return output;
+}
+
+template <class Container>
+void trace_prepared(
+    std::FILE* output, const char* prefix, const CP::SysReadHandle<Container>& handle,
+    const CP::SysReadSelectionHandle* selection, const CP::SystematicSet& nominal,
+    const EventContext& context) {
+  const Container* container = nullptr;
+  if (!handle.retrieve(container, nominal, context).isSuccess() || !container) {
+    std::fprintf(stderr, "Cannot observe stock nominal prepared collection %s\n", prefix);
+    std::abort();
+  }
+  const SG::AuxElement::ConstAccessor<ElementLink<xAOD::IParticleContainer>> original{"originalObjectLink"};
+  for (const auto* object : *container) {
+    if (!original.isAvailable(*object)) {
+      std::fprintf(stderr, "Prepared object has no original link: %s\n", prefix);
+      std::abort();
+    }
+    const auto& link = original(*object);
+    const int selected = selection ? selection->getBool(*object, nominal) : -1;
+    std::fprintf(output, "%ld\t%s\t%zu\t%u\t%u\t%d\t%a\t%a\t%a\t%a\t%a\n",
+                 event_entry, prefix, object->index(), link.persKey(), static_cast<unsigned>(link.persIndex()), selected,
+                 object->pt(), object->eta(), object->phi(), object->m(), object->e());
+  }
+}
+
 template <class... Args>
 void trace(std::size_t state, const char* action, const char* format, Args... fields) {
   auto* output = trace_file();
@@ -78,6 +118,14 @@ StatusCode CP::MetMakerAlg::execute(const EventContext& context) {
   static auto original = release_function<Function>("_ZN2CP11MetMakerAlg7executeERK12EventContext");
   ++event_entry;
   maker_state = 0;
+  if (auto* output = prepared_p4_file()) {
+    const CP::SystematicSet nominal;
+    trace_prepared(output, "jet", m_jetsHandle, nullptr, nominal, context);
+    trace_prepared(output, "ele", m_electronsHandle, &m_electronsSelection, nominal, context);
+    trace_prepared(output, "pho", m_photonsHandle, &m_photonsSelection, nominal, context);
+    trace_prepared(output, "tau", m_tausHandle, &m_tausSelection, nominal, context);
+    trace_prepared(output, "mu", m_muonsHandle, &m_muonsSelection, nominal, context);
+  }
   in_maker = true;
   const auto status = original(this, context);
   in_maker = false;
