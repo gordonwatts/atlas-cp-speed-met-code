@@ -63,10 +63,11 @@ def monitor(
     while not done.is_set():
         try:
             elapsed_ns = time.perf_counter_ns() - launch_ns
-            status = dict(line.split(":", 1) for line in (proc / "status").read_text().splitlines() if ":" in line)
+            # Verify that taskset has exec'd the Python worker before reading its affinity.
             executable = str((proc / "exe").readlink())
-            children = process_children(proc)
             if "python" in Path(executable).name:
+                status = dict(line.split(":", 1) for line in (proc / "status").read_text().splitlines() if ":" in line)
+                children = process_children(proc)
                 child_processes = {child: sampled_descendant(child) for child in children}
                 if probe_names:
                     for line in (proc / "maps").read_text().splitlines():
