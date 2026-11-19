@@ -30,6 +30,7 @@ app = typer.Typer(add_completion=False)
 class Probe:
     def __init__(self):
         self.scope = []
+        self.candidate_scope = []
         self.counts = defaultdict(lambda: defaultdict(Counter))
         self.locations = Counter()
         self.raw_array_uses = Counter()
@@ -68,9 +69,14 @@ class Probe:
             self.repeated_cluster_accesses[(scope, str(name))] += 1
         if available:
             self.raw_array_uses[(scope, method, name, kind)] += 1
-        with self.observe("candidate_group", f"{scope}/{method}/{kind}", len(rows)):
-            with self.observe("candidate_detail", f"{scope}/{method}/{kind}/{name}", len(rows)):
-                yield
+        category = f"{scope}/{method}/{kind}"
+        self.candidate_scope.append(category)
+        try:
+            with self.observe("candidate_group", category, len(rows)):
+                with self.observe("candidate_detail", f"{category}/{name}", len(rows)):
+                    yield
+        finally:
+            self.candidate_scope.pop()
 
 
 def targeted_method(method, probe):
@@ -134,6 +140,10 @@ def run_audit(demo, input_file, output, probe):
             def capture(*args, name=operation, original=original, **kwargs):
                 caller = sys._getframe(1).f_code.co_name
                 with probe.observe("awkward", f"{probe.current()}/{caller}/{name}"):
+                    if probe.candidate_scope:
+                        candidate = probe.candidate_scope[-1]
+                        with probe.observe("candidate_awkward_operations", f"{candidate}/{name}"):
+                            return original(*args, **kwargs)
                     return original(*args, **kwargs)
 
             stack.enter_context(patch.object(ak, operation, capture))
