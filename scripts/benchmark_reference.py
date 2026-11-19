@@ -29,7 +29,10 @@ def cpu_seconds() -> float:
     return usage.ru_stime + usage.ru_utime
 
 
-def monitor(pid: int, done: threading.Event, rows: list) -> None:
+def monitor(
+    pid: int, done: threading.Event, rows: list,
+    probe_names: tuple[str, ...], mappings: set[str],
+) -> None:
     other_cpus = set(os.sched_getaffinity(0)) - {CPU}
     if other_cpus:
         os.sched_setaffinity(0, {min(other_cpus)})
@@ -40,6 +43,12 @@ def monitor(pid: int, done: threading.Event, rows: list) -> None:
             executable = str((proc / "exe").readlink())
             children = (proc / "task" / str(pid) / "children").read_text().split()
             if "python" in Path(executable).name:
+                if probe_names:
+                    for line in (proc / "maps").read_text().splitlines():
+                        fields = line.split(maxsplit=5)
+                        names = Path(fields[5]).name if len(fields) == 6 else ""
+                        if names in probe_names:
+                            mappings.add(fields[5])
                 rows.append({
                     "affinity": status["Cpus_allowed_list"].strip(),
                     "threads": int(status["Threads"]),
@@ -51,16 +60,20 @@ def monitor(pid: int, done: threading.Event, rows: list) -> None:
         done.wait(0.1)
 
 
-def run(command: list[str], environment: dict, cwd: Path, log: Path) -> dict:
+def run(
+    command: list[str], environment: dict, cwd: Path, log: Path,
+    probe_names: tuple[str, ...] = (),
+) -> dict:
     command = ["taskset", "-c", str(CPU), *command]
     events = []
+    mappings = set()
     finished = threading.Event()
     with log.open("x") as output:
         before_host = snapshot_cpu()
         before_cpu = cpu_seconds()
         start = time.perf_counter_ns()
         child = subprocess.Popen(command, cwd=cwd, env=environment, stdout=output, stderr=subprocess.STDOUT)
-        sampler = threading.Thread(target=monitor, args=(child.pid, finished, events))
+        sampler = threading.Thread(target=monitor, args=(child.pid, finished, events, probe_names, mappings))
         sampler.start()
         status = child.wait()
         end = time.perf_counter_ns()
@@ -75,6 +88,7 @@ def run(command: list[str], environment: dict, cwd: Path, log: Path) -> dict:
         "process_cpu_seconds": process_cpu,
         "host_cpu0_delta_ticks": [after - before for before, after in zip(before_host, after_host, strict=True)],
         "samples": events,
+        "mapped_named_libraries": sorted(mappings),
     }
     if status != 0:
         observation["valid"] = False
